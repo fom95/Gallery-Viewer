@@ -3016,16 +3016,6 @@ function prioritizeVisibleMediums() {
 }
 
 function startMediumLoading() {
-	console.log(
-    "[MEDIUM] START:",
-    mediumItems.length,
-    "items"
-);
-
-console.log(
-    "[MEDIUM] PAUSED:",
-    thumbnailPriorityPaused
-);
 	if (
 		mediumLoading
 	) {
@@ -3377,10 +3367,10 @@ async function reloadAlbums() {
             pasteID
         );
 
-        console.log(
+        /*console.log(
             "[ALBUMS] Saved Pastepile ID:",
             pasteID
-        );
+        );*/
 
     }
 
@@ -3399,10 +3389,10 @@ async function reloadAlbums() {
 
         if (pasteID) {
 
-            console.log(
+            /*console.log(
                 "[ALBUMS] Using saved Pastepile ID:",
                 pasteID
-            );
+            );*/
 
         }
 
@@ -3426,10 +3416,10 @@ async function reloadAlbums() {
 
         try {
 
-            console.log(
+            /*console.log(
                 "[ALBUMS] Loading Pastepile:",
                 pasteID
-            );
+            );*/
 
             const response =
                 await fetch(
@@ -3447,10 +3437,10 @@ async function reloadAlbums() {
             const text =
                 await response.text();
 
-            console.log(
+            /*console.log(
                 "[ALBUMS] Pastepile text received:",
                 text
-            );
+            );*/
 
             /*
              * -------------------------------------------------
@@ -3614,13 +3604,13 @@ async function reloadAlbums() {
                     arrayEnd + 1
                 );
 
-            console.log(
+            /*console.log(
                 "[ALBUMS] Extracted MANUAL_ALBUMS:"
-            );
+            );*/
 
-            console.log(
+            /*console.log(
                 arrayText
-            );
+            );*/
 
             /*
              * -------------------------------------------------
@@ -3645,10 +3635,10 @@ async function reloadAlbums() {
 
             }
 
-            console.log(
+            /*console.log(
                 "[ALBUMS] Parsed Pastepile albums:",
                 manualAlbums.length
-            );
+            );*/
 
         }
         catch (error) {
