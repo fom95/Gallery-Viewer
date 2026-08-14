@@ -266,10 +266,10 @@ async function initAlbums() {
          * that logic.
          */
 
-        console.log(
+        /*console.log(
             "[ALBUM] Unsaved album:",
             albumID
-        );
+        );*/
 
         /*
          * -------------------------------------------------
@@ -2613,7 +2613,7 @@ function loadMedium(
 	item,
 	session) {
 
-	console.log(
+	/*console.log(
 		"[MEDIUM DEBUG] BACKGROUND REQUEST:",
 		{
 			index:
@@ -2634,7 +2634,7 @@ function loadMedium(
 					item.mediumImage
 				)
 		}
-	);
+	);*/
 
 	return new Promise(
 		resolve => {
@@ -2764,11 +2764,11 @@ function loadMedium(
 					/*img.style.zIndex =
 						"2";*/
 
-					console.log(
+					/*console.log(
 						"[MEDIUM] LOADED:",
 						item.index,
 						mediumURL
-					);
+					);*/
 
 				}
 				else {
@@ -3241,11 +3241,11 @@ function markMediumItemLoaded(
 			img.style.opacity =
 				"1";
 
-			console.log(
+			/*console.log(
 				"[MEDIUM] MODAL -> DOM LOADED:",
 				item.index,
 				url
-			);
+			);*/
 
 		}
 		else {
@@ -4297,7 +4297,7 @@ async function load(url, name, loadID) {
 
 		if (name === "medium") {
 
-			console.log(
+			/*console.log(
 				"[MEDIUM DEBUG] MODAL LOAD REACHED:",
 				{
 					url,
@@ -4305,7 +4305,7 @@ async function load(url, name, loadID) {
 						!!modalImgMedium,
 					loadID
 				}
-			);
+			);*/
 
 			if (!modalImgMedium) {
 
@@ -4323,7 +4323,7 @@ async function load(url, name, loadID) {
 					blobURL
 				);
 
-			console.log(
+			/*console.log(
 				"[MEDIUM DEBUG] MODAL REGISTERED:",
 				registeredMedium &&
 				{
@@ -4342,7 +4342,7 @@ async function load(url, name, loadID) {
 					hasImage:
 						!!registeredMedium.mediumImage
 				}
-			);
+			);*/
 
 			/*
 			 * -------------------------------------------------
@@ -4935,7 +4935,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 			? mediumItem.mediumImage
 			: null;
 			
-	console.log(
+	/*console.log(
     "[MEDIUM DEBUG] OPEN MODAL:",
     {
         mediumSrc:
@@ -4973,7 +4973,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
         sourceMediumImage:
             !!sourceMediumImage
     }
-);
+);*/
 
     const loadID =
         ++modalLoadID;
