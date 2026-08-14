@@ -1,0 +1,697 @@
+html.pageLoading body {
+    visibility: hidden;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background: #111;
+    color: #fff;
+    text-align: center;
+	display: flex;
+	flex-direction: column;
+	margin: 0px;
+}
+
+#nav {
+	height: calc(7.5vw/16*9);
+	min-height: 75px;
+	width: 100vw;
+}
+
+#navCont {
+    position: fixed;
+    top: 0;
+    left: 0;
+
+    width: 100%;
+    height: 75px;
+
+    z-index: 2;
+
+    background-color: rgba(0, 0, 0, 0.85);
+
+    display: flex;
+    align-items: center;
+
+    box-sizing: border-box;
+    padding: 0px 15px;
+}
+
+#searchCont {
+	position: relative;
+	height: 100%;
+	width: 300px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+#tagSearch {
+    width: inherit;
+	height: 50%;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+#clearSearch {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+
+    width: 20px;
+    height: 20px;
+
+    padding: 0;
+    border: none;
+    background: none;
+
+    color: #888;
+    font-size: 18px;
+    line-height: 20px;
+
+    cursor: pointer;
+}
+
+#clearSearch:hover {
+    color: white;
+}
+
+#tagSuggestions {
+    position: absolute;
+    top: 80%;
+    width: inherit;
+    background: rgba(255, 255, 255, 0.9);
+    color: black;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 2;
+}
+
+#searchButton {
+    padding: 10px 15px;
+    flex-shrink: 0;
+}
+
+#pageName {
+    margin: 0 15px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    margin-right: auto;
+}
+
+#saveButton {
+    height: 45px;
+    width: 45px;
+
+    padding: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    flex-shrink: 0;
+}
+
+#backButton {
+    height: 45px;
+    width: 90px;
+
+    flex-shrink: 0;
+}
+
+button {
+    cursor: pointer;
+}
+
+.suggestion {
+    padding: 3px 8px;
+    cursor: pointer;
+}
+
+.suggestion:hover {
+    background: #ddd;
+}
+
+##tagSuggestions .suggestion.selected {
+    background-color: #ddd;
+}
+
+#content {
+    display: flex;
+    align-items: flex-start;
+}
+
+#tagBar {
+    width: 20vw;
+    flex: 0 0 20vw;
+    box-sizing: border-box;
+
+    display: flex;
+    flex-direction: column;
+
+    position: sticky;
+    top: 85px;
+
+    max-height: calc(81vh - 10px);
+    margin-top: 1vw;
+	margin-left: 1vw;
+	
+    opacity: 1;
+	overflow: hidden;
+
+    transition:
+        width 0.3s ease,
+        flex-basis 0.3s ease,
+        padding 0.3s ease,
+        opacity 0.3s ease;
+	visibility: hidden;
+}
+
+#tagBar.hidden {
+    width: 0;
+    flex-basis: 0;
+    opacity: 0;
+	margin: 0;
+}
+
+#tagBar.noTransition {
+    transition: none !important;
+}
+
+#filterMode {
+    margin-bottom: 8px;
+    flex-shrink: 0;
+	flex: 1;
+}
+
+#clearTags {
+    margin-bottom: 8px;
+    flex-shrink: 0;
+    flex: 1;
+}
+
+#tagList {
+    overflow-y: auto;
+    overflow-x: hidden;
+
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.tag {
+    width: 100%;
+    box-sizing: border-box;
+
+    font-size: 11px;
+    padding: 3px 6px;
+
+    text-align: left;
+
+    white-space: nowrap;
+    overflow: clip;
+    text-overflow: ellipsis;
+}
+
+.tag.selected {
+    background: #3d7cff;
+    color: white;
+}
+
+#gallery {
+	flex: 1 1 0;
+    min-width: 0;
+	
+    position: relative;
+    /*display: grid;
+
+    grid-template-columns:
+        repeat(auto-fit, minmax(180px, 1fr));
+
+    gap: 1vw;
+	*/
+    padding: 1vw;
+	min-width: 0;
+	--gallery-animation-speed: 0.30s;
+}
+
+.thumb {
+    position: absolute;
+    width: 0;
+    height: 0;
+	margin: 0;
+    /*
+    width: 100%;aspect-ratio: 1 / 1;
+    height: auto;
+	*/
+
+    object-fit: cover;
+    cursor: pointer;
+	border-radius: 8px;
+    /*
+	transition: transform 0.2s;
+	*/
+	transition:
+        left var(--gallery-animation-speed) ease,
+        top var(--gallery-animation-speed) ease,
+        width var(--gallery-animation-speed) ease,
+        height var(--gallery-animation-speed) ease;
+}
+
+.thumb.flip-moving {
+    transition: none !important;
+    will-change: transform;
+}
+
+.thumb:hover {
+    transform: scale(1.025);
+}
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    justify-content: center;
+    align-items: center;
+	touch-action: none;
+	z-index: 3;
+}
+
+.modal img {
+    user-select: none;
+    -webkit-user-drag: none;
+    touch-action: none;
+
+    will-change: transform;
+    transform: translateZ(0);
+}
+
+#modalImg:active {
+    cursor: grabbing;
+}
+
+#modalLoading {
+    position: absolute;
+	z-index: 3;
+    right: 20px;
+    bottom: 20px;
+
+    width: 24px;
+    height: 24px;
+
+    border: 3px solid rgba(255,255,255,0.4);
+    border-top-color: white;
+    border-radius: 50%;
+
+    animation: modalSpin 0.8s linear infinite;
+
+    opacity: 0;
+    pointer-events: none;
+}
+
+#modalLoading.active {
+    opacity: 1 !important;
+}
+
+@keyframes modalSpin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.album {
+    cursor: pointer;
+    text-align: center;
+    position: absolute;
+    box-sizing: border-box;
+	transition:
+        left var(--gallery-animation-speed) ease,
+        top var(--gallery-animation-speed) ease,
+        width var(--gallery-animation-speed) ease,
+        height var(--gallery-animation-speed) ease;
+}
+
+.album img {
+    width: 100%;
+	height: auto;
+	aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 8px;
+    transition: transform 0.2s;
+}
+
+.album img:hover {
+    transform: scale(1.05);
+}
+
+.album div {
+    margin-top: 6px;
+}
+
+.album-delete {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+
+    width: 26px;
+    height: 26px;
+
+    padding: 0;
+    margin: 0;
+
+    border-radius: 50%;
+    border: none;
+
+    background: #900;
+    color: white;
+
+    font-size: 20px;
+    font-family: Arial, sans-serif;
+    font-weight: bold;
+
+    line-height: 24px;
+    text-align: center;
+
+    cursor: pointer;
+
+    display: none;
+}
+
+.album:hover .album-delete {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.album-delete:hover {
+    background: red;
+}
+
+.album-export {
+    position: absolute;
+    bottom: -8px;
+    right: -8px;
+
+    width: 26px;
+    height: 26px;
+
+    padding: 0;
+    margin: 0;
+
+    border-radius: 50%;
+    border: none;
+
+    background: #066;
+    color: white;
+
+    font-size: 16px;
+    font-weight: bold;
+
+    display: none;
+
+    cursor: pointer;
+}
+
+.album:hover .album-export {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.album-export:hover {
+    background: #099;
+}
+
+#tagControls {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.tag.excluded {
+    background: #8b0000;
+    color: white;
+}
+
+#bottomBar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+
+    width: 100%;
+    height: 35px;
+
+    background-color: rgba(0, 0, 0, 0.85);
+
+    z-index: 2;
+
+    display: flex;
+    align-items: center;
+}
+
+#tagToggle {
+    width: 35px;
+    height: 35px;
+
+    padding: 0;
+    border: none;
+
+    background: none;
+    color: white;
+
+    font-size: 20px;
+
+    cursor: pointer;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+	position: absolute;
+	top: 50px;
+	left: 10px;
+	z-index: 2;
+}
+
+#albumBottomControls {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+#regenerateAlbum {
+    width: 42px;
+    height: 42px;
+
+    padding: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border: none;
+    border-radius: 50%;
+
+    background: #333;
+    color: white;
+
+    font-size: 24px;
+    line-height: 1;
+
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+#regenerateAlbum:hover {
+    opacity: 1;
+    background: #444;
+}
+
+#modalImageContainer {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+#modalFullButton {
+    position: absolute;
+    right: 20px;
+    bottom: 20px;
+
+    width: 32px;
+    height: 32px;
+
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+
+    font-size: 17px;
+
+    cursor: pointer;
+    z-index: 3;
+
+    opacity: 0.8;
+
+    transition:
+        opacity 0.15s,
+        background 0.15s;
+}
+
+#modalFullButton:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.7);
+}
+
+#modalFullButton:disabled {
+    cursor: default;
+}
+
+#modalImageContainer {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+}
+
+#modalImgSmall,
+#modalImgMedium,
+#modalImgFull {
+    position: absolute;
+
+    left: 50%;
+    top: 50%;
+
+    max-width: none;
+    max-height: none;
+
+    object-fit: contain;
+    transform-origin: center center;
+
+    user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: auto;
+	transition: filter 100ms ease;
+}
+
+#modalImgFull {
+    visibility: hidden;
+}
+
+#zoomLevel {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+
+    color: white;
+    font-size: 16px;
+    font-weight: 500;
+
+    background: rgba(0, 0, 0, 0.35);
+    padding: 5px 8px;
+    border-radius: 5px;
+
+    pointer-events: none;
+    user-select: none;
+
+    opacity: 0;
+    transition: opacity 0.15s ease;
+
+    z-index: 1000;
+}
+
+#zoomLevel.visible {
+    opacity: 1;
+}
+#modalProgress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+
+    width: 100%;
+    height: 3px;
+
+    background: rgba(255,255,255,0.15);
+
+    opacity: 0;
+    pointer-events: none;
+
+    z-index: 9999;
+}
+
+#modalLoadingBar {
+    position: absolute;
+
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+
+    height: 4px;
+
+    background: rgba(255,255,255,0.25);
+
+    border-radius: 3px;
+
+    overflow: hidden;
+
+    opacity: 0;
+
+    pointer-events: none;
+
+    z-index: 9999;
+}
+
+
+#modalLoadingProgress {
+    width: 0%;
+
+    height: 100%;
+
+    background: white;
+
+    border-radius: 3px;
+
+    transition: width 0.05s linear;
+}
+
+.thumbnail-slot {
+    width: 100%;
+    min-width: 0;
+}
+
+.thumbnail-slot .thumb {
+    display: block;
+}
+.thumbnail-slot {
+    position: absolute;
+    overflow: hidden;
+}
+
+.thumbnail-image,
+.medium-image {
+    position: absolute;
+    top: 0;
+    left: 0;
+
+    width: 100%;
+    height: 100%;
+
+    object-fit: cover;
+}
