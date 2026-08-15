@@ -18,6 +18,7 @@ const homeMinColumns = 2;
 const homeMaxColumns = 10;
 const homeMinThumbWidth = 180;
 const homeHeightMultiplier = 1.12;
+let currentTemporaryAlbumID = null;
 
 function generateAlbumID(name, currentID) {
 
@@ -240,53 +241,65 @@ async function initAlbums() {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * UNSAVED ALBUM
-     * -------------------------------------------------
-     *
-     * ?=ALBUM_ID
-     *
-     * Keep your existing unsaved-album handling here.
-     */
+	/*
+	 * -------------------------------------------------
+	 * TEMPORARY ALBUM
+	 * -------------------------------------------------
+	 *
+	 * ?=ALBUM_ID
+	 *
+	 * The actual album data is stored temporarily in
+	 * localStorage. The URL only contains its ID.
+	 */
 
-    if (
-        query.startsWith("=")
-    ) {
+	if (
+		query.startsWith("=")
+	) {
 
-        const albumID =
-            decodeURIComponent(
-                query.substring(1)
-            );
+		const albumID =
+			decodeURIComponent(
+				query.substring(1)
+			);
 
-        /*
-         * Put your existing ?= handling here.
-         *
-         * If your current code has a specific way
-         * of retrieving unsaved albums, preserve
-         * that logic.
-         */
+		const album =
+			getTemporaryAlbum(
+				albumID
+			);
 
-        /*console.log(
-            "[ALBUM] Unsaved album:",
-            albumID
-        );*/
+		if (
+			album
+		) {
+			currentTemporaryAlbumID =
+				albumID;
 
-        /*
-         * -------------------------------------------------
-         * TEMPORARY FALLBACK
-         * -------------------------------------------------
-         *
-         * If your existing ?= logic is elsewhere,
-         * this prevents it from being interpreted as
-         * an ImgBB image query.
-         */
+			currentAlbum =
+				album;
 
-        await showAlbums();
+			isQueryAlbum =
+				false;
 
-        return;
+			loadAlbumFromURL(
+				album
+			);
 
-    }
+			showAlbumButtons(
+				true
+			);
+
+			return;
+
+		}
+
+		console.warn(
+			"Temporary album not found:",
+			albumID
+		);
+
+		await showAlbums();
+
+		return;
+
+	}
 
     /*
      * -------------------------------------------------
@@ -572,6 +585,18 @@ async function showAlbums() {
      */
 
     //await reloadAlbums();
+	
+	
+	if (!albums.length) {
+
+    await reloadAlbums();
+
+}
+	else {
+
+		refreshSavedAlbums();
+
+	}
 
     document.getElementById("backButton").style.display =
         "none";
@@ -777,6 +802,54 @@ async function showAlbums() {
         }
     );
 
+	/*
+	 * -------------------------------------------------
+	 * ADD ALBUM BUTTON
+	 * -------------------------------------------------
+	 *
+	 * Always appears after every normal album.
+	 */
+
+	const addCard =
+		document.createElement("div");
+
+	addCard.className =
+		"album album-add";
+
+	const addImage =
+		document.createElement("div");
+
+	addImage.className =
+		"album-add-image";
+
+	addImage.textContent =
+		"+";
+
+	const addTitle =
+		document.createElement("div");
+
+	addTitle.textContent =
+		"Add New";
+
+	addCard.appendChild(
+		addImage
+	);
+
+	addCard.appendChild(
+		addTitle
+	);
+
+	addCard.onclick =
+		() => {
+
+			openAlbumInput();
+
+		};
+
+	gallery.appendChild(
+		addCard
+	);
+
     applyGalleryLayout(
         false
     );
@@ -784,6 +857,92 @@ async function showAlbums() {
     document.documentElement.classList.remove(
         "pageLoading"
     );
+
+}
+
+function refreshSavedAlbums() {
+
+    /*
+     * -------------------------------------------------
+     * REMOVE CURRENTLY CACHED LOCALSTORAGE ALBUMS
+     * -------------------------------------------------
+     */
+
+    for (
+        let i = albums.length - 1;
+        i >= 0;
+        i--
+    ) {
+
+        if (
+            albums[i].storage
+        ) {
+
+            albums.splice(
+                i,
+                1
+            );
+
+        }
+
+    }
+
+    /*
+     * -------------------------------------------------
+     * READ CURRENT SAVED ALBUMS
+     * -------------------------------------------------
+     */
+
+    const saved =
+        JSON.parse(
+            localStorage.getItem(
+                "savedAlbums"
+            ) || "[]"
+        );
+
+    /*
+     * -------------------------------------------------
+     * ADD CURRENT LOCALSTORAGE ALBUMS
+     * -------------------------------------------------
+     */
+
+    saved.forEach(
+        album => {
+
+            albums.push({
+
+                ...album,
+
+                tags:
+                    album.tags ||
+                    [],
+
+                storage:
+                    true
+
+            });
+
+        }
+    );
+
+}
+
+function returnToAlbums() {
+
+    if (
+        currentTemporaryAlbumID
+    ) {
+
+        deleteTemporaryAlbum(
+            currentTemporaryAlbumID
+        );
+
+        currentTemporaryAlbumID =
+            null;
+
+    }
+
+    showAlbums();
 
 }
 
@@ -802,6 +961,212 @@ async function buildAlbumTags(album) {
     album.tags = [...tagSet];
 
     buildTagList(album.tags);
+}
+
+const TEMP_ALBUM_STORAGE_KEY =
+    "temporaryAlbums";
+
+function getTemporaryAlbums() {
+
+    return JSON.parse(
+        localStorage.getItem(
+            TEMP_ALBUM_STORAGE_KEY
+        ) || "{}"
+    );
+
+}
+
+function saveTemporaryAlbum(
+    album) {
+
+    const temporaryAlbums =
+        getTemporaryAlbums();
+
+    temporaryAlbums[album.id] =
+        album;
+
+    localStorage.setItem(
+        TEMP_ALBUM_STORAGE_KEY,
+        JSON.stringify(
+            temporaryAlbums
+        )
+    );
+
+}
+
+function getTemporaryAlbum(
+    id) {
+
+    const temporaryAlbums =
+        getTemporaryAlbums();
+
+    return temporaryAlbums[id] ||
+        null;
+
+}
+
+function deleteTemporaryAlbum(
+    id) {
+
+    if (!id)
+        return;
+
+    const temporaryAlbums =
+        getTemporaryAlbums();
+
+    if (
+        !temporaryAlbums[id]
+    ) {
+
+        return;
+
+    }
+
+    delete temporaryAlbums[id];
+
+    localStorage.setItem(
+        TEMP_ALBUM_STORAGE_KEY,
+        JSON.stringify(
+            temporaryAlbums
+        )
+    );
+
+}
+
+function openAlbumInput() {
+
+    let overlay =
+        document.getElementById(
+            "albumInputOverlay"
+        );
+
+    if (overlay) {
+
+        overlay.style.display =
+            "flex";
+
+        return;
+
+    }
+
+    overlay =
+        document.createElement(
+            "div"
+        );
+
+    overlay.id =
+        "albumInputOverlay";
+
+    overlay.innerHTML = `
+        <div class="album-input-box">
+
+            <div class="album-input-title">
+                Open Album
+            </div>
+
+            <input
+                id="albumInput"
+                type="text"
+                placeholder="Paste album URL"
+                autocomplete="off"
+            >
+
+            <div class="album-input-buttons">
+
+                <button id="albumInputCancel">
+                    Cancel
+                </button>
+
+                <button id="albumInputOpen">
+                    Open
+                </button>
+
+            </div>
+
+        </div>
+    `;
+
+    document.body.appendChild(
+        overlay
+    );
+
+    const input =
+        document.getElementById(
+            "albumInput"
+        );
+
+    const openButton =
+        document.getElementById(
+            "albumInputOpen"
+        );
+
+    const cancelButton =
+        document.getElementById(
+            "albumInputCancel"
+        );
+
+    openButton.onclick =
+        () => {
+
+            const value =
+                input.value.trim();
+
+            if (!value)
+                return;
+
+            overlay.remove();
+
+            openTemporaryAlbumFromURL(
+                value
+            );
+
+        };
+
+    cancelButton.onclick =
+        () => {
+
+            overlay.remove();
+
+        };
+
+    overlay.onclick =
+        (e) => {
+
+            if (
+                e.target === overlay
+            ) {
+
+                overlay.remove();
+
+            }
+
+        };
+
+    input.addEventListener(
+        "keydown",
+        e => {
+
+            if (
+                e.key === "Enter"
+            ) {
+
+                openButton.click();
+
+            }
+
+            if (
+                e.key === "Escape"
+            ) {
+
+                cancelButton.click();
+
+            }
+
+        }
+    );
+
+    input.focus();
+
 }
 
 //gets all unique tags, requires all loaded
@@ -1334,6 +1699,96 @@ function loadAlbumFromURL(album) {
 
 	document.documentElement.classList.remove(
 		"pageLoading");
+
+}
+
+function openTemporaryAlbumFromURL(
+    url) {
+
+    if (!url)
+        return;
+
+    const query =
+        getAlbumQuery(
+            url.trim()
+        );
+
+    if (!query) {
+
+        alert(
+            "No album query was found in that URL."
+        );
+
+        return;
+
+    }
+
+    const album =
+        createQueryAlbum(
+            query
+        );
+
+    /*
+     * -------------------------------------------------
+     * GENERATE TEMPORARY ID
+     * -------------------------------------------------
+     */
+
+    const id =
+        generateAlbumID(
+            album.name
+        );
+
+    album.id =
+        id;
+
+    album.temporary =
+        true;
+
+    /*
+     * -------------------------------------------------
+     * STORE CURRENT TEMPORARY ALBUM ID
+     * -------------------------------------------------
+     *
+     * This tells the navigation code that this is
+     * the temporary album currently being viewed.
+     */
+
+    currentTemporaryAlbumID =
+        id;
+
+    /*
+     * -------------------------------------------------
+     * STORE TEMPORARY ALBUM
+     * -------------------------------------------------
+     */
+
+    saveTemporaryAlbum(
+        album
+    );
+
+    /*
+     * -------------------------------------------------
+     * LOAD IT
+     * -------------------------------------------------
+     */
+
+    history.pushState(
+        null,
+        "",
+        "?=" +
+        encodeURIComponent(
+            id
+        )
+    );
+
+    loadAlbumFromURL(
+        album
+    );
+
+    showAlbumButtons(
+        true
+    );
 
 }
 
@@ -3758,7 +4213,21 @@ function showAlbumButtons(show) {
         show ? "" : "none";
 
     document.getElementById("saveButton").style.display =
-        (show && isQueryAlbum) ? "flex" : "none";
+        (
+            show &&
+            (
+                isQueryAlbum ||
+                currentTemporaryAlbumID !== null
+            )
+        )
+            ? "flex"
+            : "none";
+
+    document.getElementById("regenerateAlbum").style.display =
+        show ? "" : "none";
+
+    document.getElementById("tagToggle").style.display =
+        show ? "" : "none";
 }
 
 function saveCurrentAlbum() {
@@ -3797,6 +4266,19 @@ function saveCurrentAlbum() {
     localStorage.setItem(
         "savedAlbums",
         JSON.stringify(saved));
+		
+	if (
+		currentTemporaryAlbumID
+	) {
+
+		deleteTemporaryAlbum(
+			currentTemporaryAlbumID
+		);
+
+		currentTemporaryAlbumID =
+			null;
+
+	}
 
     alert("Album saved as " + `Temp_${number}`);
 }
@@ -8379,69 +8861,179 @@ function cancelImageLoads() {
 }
 
 window.addEventListener("popstate", async () => {
+        /*
+         * -------------------------------------------------
+         * LEAVING TEMPORARY ALBUM
+         * -------------------------------------------------
+         *
+         * If the current page is a temporary album and
+         * browser navigation is taking us somewhere else,
+         * remove its temporary storage.
+         */
 
-    const query =
-        decodeURIComponent(
-            location.search.substring(1)
-        );
+        const previousTemporaryID =
+            currentTemporaryAlbumID;
 
-    if (!query) {
+        currentTemporaryAlbumID =
+            null;
 
-        closeModal(false);
-
-        await reloadAlbums();
-
-        showAlbums();
-
-        return;
-
-    }
-
-    if (query.startsWith("$")) {
-
-        const albumID =
-            query.substring(1);
-
-        await reloadAlbums();
-
-        const album =
-            albums.find(
-                a =>
-                    a.id === albumID
+        const query =
+            decodeURIComponent(
+                location.search.substring(1)
             );
 
-        if (album) {
+        /*
+         * -------------------------------------------------
+         * HOME
+         * -------------------------------------------------
+         */
 
-            closeModal(false);
+        if (
+            !query
+        ) {
 
-            loadAlbumFromURL(
-                album
-            );
+            if (
+                previousTemporaryID
+            ) {
+
+                deleteTemporaryAlbum(
+                    previousTemporaryID
+                );
+
+            }
+
+            closeModal();
+
+            await showAlbums();
 
             return;
 
         }
 
-        showAlbums();
+        /*
+         * -------------------------------------------------
+         * SAVED / MANUAL ALBUM
+         * -------------------------------------------------
+         */
 
-        return;
+        if (
+            query.startsWith("$")
+        ) {
 
-    }
+            if (
+                previousTemporaryID
+            ) {
 
-    // ImgBB image-query URL
+                deleteTemporaryAlbum(
+                    previousTemporaryID
+                );
 
-    const albumQuery =
-        createQueryAlbum(
-            query
+            }
+
+            const albumID =
+                query.substring(1);
+
+            await reloadAlbums();
+
+            const album =
+                albums.find(
+                    a =>
+                        a.id === albumID
+                );
+
+            if (
+                album
+            ) {
+
+                closeModal();
+
+                loadAlbumFromURL(
+                    album
+                );
+
+                return;
+
+            }
+
+            await showAlbums();
+
+            return;
+
+        }
+
+        /*
+         * -------------------------------------------------
+         * TEMPORARY ALBUM
+         * -------------------------------------------------
+         *
+         * Normally this will only happen if the user
+         * navigates forward to one.
+         */
+
+        if (
+            query.startsWith("=")
+        ) {
+
+            const albumID =
+                query.substring(1);
+
+            const album =
+                getTemporaryAlbum(
+                    albumID
+                );
+
+            if (
+                album
+            ) {
+
+                currentTemporaryAlbumID =
+                    albumID;
+
+                closeModal();
+
+                loadAlbumFromURL(
+                    album
+                );
+
+                return;
+
+            }
+
+            await showAlbums();
+
+            return;
+
+        }
+
+        /*
+         * -------------------------------------------------
+         * IMGBB QUERY
+         * -------------------------------------------------
+         */
+
+        if (
+            previousTemporaryID
+        ) {
+
+            deleteTemporaryAlbum(
+                previousTemporaryID
+            );
+
+        }
+
+        const albumQuery =
+            createQueryAlbum(
+                query
+            );
+
+        closeModal();
+
+        loadAlbumFromURL(
+            albumQuery
         );
 
-    closeModal(false);
-
-    loadAlbumFromURL(
-        albumQuery
-    );
-
-});
+    }
+);
 
 document.getElementById("filterMode").onclick = function () {
 
@@ -10214,21 +10806,6 @@ document.getElementById("regenerateAlbum").onclick = () => {
     });
 
 };
-
-function showAlbumButtons(show) {
-
-    document.getElementById("backButton").style.display =
-        show ? "" : "none";
-
-    document.getElementById("saveButton").style.display =
-        (show && isQueryAlbum) ? "flex" : "none";
-
-    document.getElementById("regenerateAlbum").style.display =
-        show ? "" : "none";
-
-    document.getElementById("tagToggle").style.display =
-        show ? "" : "none";
-}
 
 function saveTagBarState() {
 

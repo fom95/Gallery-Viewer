@@ -695,3 +695,37 @@ button {
 
     object-fit: cover;
 }
+.album-add-image {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    box-sizing: border-box;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    position: relative;
+
+    font-size: 48px;
+    font-weight: 300;
+
+    border-radius: 8px;
+
+    overflow: hidden;
+}
+
+.album-add-image::before {
+    content: "";
+
+    position: absolute;
+    inset: 8px;
+
+    border: 1px solid white;
+    border-radius: 8px;
+
+    pointer-events: none;
+}
+
+.album-add-image:hover {
+    transform: scale(1.05);
+}
