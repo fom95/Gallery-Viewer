@@ -126,7 +126,8 @@ async function initAlbums() {
         location.search.substring(1);
 
     if (!query) {
-
+		
+		await reloadAlbums();
         await showAlbums();
 
         return;
@@ -512,7 +513,7 @@ async function showAlbums() {
     document.getElementById("tagToggle").style.display =
         "none";
 
-    closeModal();
+    //closeModal();
 
     document.getElementById("pageName").textContent =
         "ImgBB Galleries";
@@ -555,6 +556,14 @@ async function showAlbums() {
 
     currentAlbum =
         null;
+		
+	stopThumbnailLoading();
+
+    thumbnailItems =
+        [];
+
+    thumbnailQueue =
+        [];
 
     /*
      * -------------------------------------------------
@@ -562,7 +571,7 @@ async function showAlbums() {
      * -------------------------------------------------
      */
 
-    await reloadAlbums();
+    //await reloadAlbums();
 
     document.getElementById("backButton").style.display =
         "none";
@@ -1941,6 +1950,8 @@ function loadThumbnail(
 
 async function processThumbnailQueue(
     session) {
+		console.log("start");
+		//debugger;
 
     if (
         thumbnailPriorityPaused
@@ -5988,7 +5999,9 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 	}
 }
 
-function closeModal() {
+function closeModal(
+	resumeGallery = true
+) {
 
 	/*
 	 * -------------------------------------------------
@@ -6023,23 +6036,37 @@ function closeModal() {
 	 * RESUME NORMAL GALLERY LOADING
 	 * -------------------------------------------------
 	 *
-	 * The modal may have paused the normal thumbnail
-	 * loading chain.
+	 * Only resume the normal gallery queue when
+	 * requested.
 	 *
-	 * Do NOT start Medium directly.
+	 * Navigation functions that are about to destroy
+	 * the current gallery can call:
 	 *
-	 * processThumbnailQueue() will determine whether
-	 * there are still thumbnails to load. If there are,
-	 * it continues thumbnails. If all thumbnails are
-	 * finished, it automatically calls startMediumLoading().
+	 *     closeModal(false);
+	 *
+	 * so the old gallery queue is not restarted just
+	 * before the gallery is replaced.
+	 *
+	 * Normal modal closing continues to use:
+	 *
+	 *     closeModal();
+	 *
+	 * which preserves the existing behavior.
 	 */
 
-	thumbnailPriorityPaused =
-		false;
+	if (
+		resumeGallery
+	) {
+		console.log("close false");
 
-	processThumbnailQueue(
-		thumbnailLoadSession
-	);
+		thumbnailPriorityPaused =
+			false;
+
+		processThumbnailQueue(
+			thumbnailLoadSession
+		);
+
+	}
 
 	/*
 	 * -------------------------------------------------
@@ -8351,41 +8378,69 @@ function cancelImageLoads() {
     activeImageLoaders.length = 0;
 }
 
-window.addEventListener("popstate", () => {
+window.addEventListener("popstate", async () => {
 
-    const query = decodeURIComponent(
-            location.search.substring(1));
+    const query =
+        decodeURIComponent(
+            location.search.substring(1)
+        );
 
     if (!query) {
-        closeModal();
+
+        closeModal(false);
+
+        await reloadAlbums();
+
         showAlbums();
+
         return;
+
     }
 
     if (query.startsWith("$")) {
 
-        const albumID = query.substring(1);
+        const albumID =
+            query.substring(1);
 
-        reloadAlbums();
+        await reloadAlbums();
 
-        const album = albums.find(a =>
-                a.id === albumID);
+        const album =
+            albums.find(
+                a =>
+                    a.id === albumID
+            );
 
         if (album) {
-            closeModal();
-            loadAlbumFromURL(album);
+
+            closeModal(false);
+
+            loadAlbumFromURL(
+                album
+            );
+
             return;
+
         }
 
         showAlbums();
+
         return;
+
     }
 
     // ImgBB image-query URL
-    const albumQuery = createQueryAlbum(query);
 
-    closeModal();
-    loadAlbumFromURL(albumQuery);
+    const albumQuery =
+        createQueryAlbum(
+            query
+        );
+
+    closeModal(false);
+
+    loadAlbumFromURL(
+        albumQuery
+    );
+
 });
 
 document.getElementById("filterMode").onclick = function () {
@@ -9995,7 +10050,7 @@ function searchAlbumsByTags() {
 
 function showSearchResults(results) {
 
-    closeModal();
+    closeModal(false);
 
     // Remove album URL state
     history.replaceState(
@@ -10012,20 +10067,28 @@ function showSearchResults(results) {
     document.getElementById("saveButton").style.display = "none";
 
     // Hide / clear tags
-    const tagContainer = document.getElementById("tagBar");
+    const tagContainer =
+        document.getElementById("tagBar");
 
     if (tagContainer) {
+
         tagContainer.style.display = "none";
-        document.getElementById("tagToggle").style.display = "none";
+
+        document.getElementById(
+            "tagToggle"
+        ).style.display = "none";
+
     }
 
-    const gallery = document.getElementById("gallery");
+    const gallery =
+        document.getElementById("gallery");
 
     gallery.innerHTML = "";
 
     if (!results.length) {
 
-        gallery.textContent = "No albums found.";
+        gallery.textContent =
+            "No albums found.";
 
         return;
 
@@ -10033,28 +10096,55 @@ function showSearchResults(results) {
 
     results.forEach(album => {
 
-        const cover = album.images[
-                Math.floor(Math.random() * album.images.length)
+        const cover =
+            album.images[
+                Math.floor(
+                    Math.random() *
+                    album.images.length
+                )
             ];
 
-        const card = document.createElement("div");
+        const card =
+            document.createElement("div");
 
-        card.className = "album";
+        card.className =
+            "album";
 
-        const img = document.createElement("img");
-        img.src = cover.thumb.url;
+        const img =
+            document.createElement("img");
 
-        const title = document.createElement("div");
-        title.textContent = album.name;
+        img.src =
+            cover.thumb.url;
+
+        const title =
+            document.createElement("div");
+
+        title.textContent =
+            album.name;
 
         card.appendChild(img);
         card.appendChild(title);
 
-        card.onclick = () => loadAlbum(album);
+        card.onclick =
+            () => loadAlbum(album);
 
         gallery.appendChild(card);
 
     });
+
+    /*
+     * -------------------------------------------------
+     * INITIAL GALLERY LAYOUT
+     * -------------------------------------------------
+     *
+     * The gallery has just been rebuilt, so its
+     * dimensions may not yet have settled.
+     *
+     * Start the same resize tracking used when the
+     * browser itself is resized.
+     */
+
+    startGalleryResizeTracking();
 
 }
 
