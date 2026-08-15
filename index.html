@@ -12,21 +12,18 @@
 <body>
 	<div id="nav">
 		<div id="navCont">
-			<button id="tagToggle" title="Show/Hide Tags">
-				🏷
-			</button>
 			<div id="searchCont">
 				<input id="tagSearch" placeholder="Search tags...">
 				<button id="clearSearch">×</button>
 				<div id="tagSuggestions"></div>
 			</div>
-			<button id="searchButton">Search</button>
+			<button id="searchButton">🔍</button>
 			<h1 id="pageName">ImgBB Galleries</h1>
 			<button id="saveButton" onclick="saveCurrentAlbum()" style="display:none;">
 				💾
 			</button>
 			<button id="backButton" onclick="showAlbums()" style="display:none;">
-				← Albums
+				←
 			</button>
 		</div>
 	</div>
@@ -60,6 +57,7 @@
 	</div>
 	
 	<div id="bottomBar">
+		<button id="tagToggle" title="Show/Hide Tags">🏷</button>
 	</div>
 	<footer id="albumBottomControls">
 		<button id="regenerateAlbum" title="Regenerate albums.js entry">↻</button>
