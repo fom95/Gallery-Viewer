@@ -113,8 +113,8 @@ async function initAlbums() {
      * ?$ALBUM_ID
      *     Saved/manual album
      *
-     * ?@PASTEPILE_ID
-     *     Pastepile album database
+     * ?@BASE64_GITHUB_URL
+     *     GitHub album database
      *
      * ?=ALBUM_ID
      *     Unsaved/local album
@@ -137,7 +137,7 @@ async function initAlbums() {
 
     /*
      * -------------------------------------------------
-     * PASTEPILE ALBUM DATABASE
+     * GITHUB ALBUM DATABASE
      * -------------------------------------------------
      */
 
@@ -146,24 +146,37 @@ async function initAlbums() {
     ) {
 
         /*
-         * The Pastepile ID is everything after @.
+         * The Base64URL encoded GitHub URL is
+         * everything after @.
          */
 
         const pasteID =
-            decodeURIComponent(
+            decodeBase64URL(
                 query.substring(1)
             );
 
+        if (!pasteID) {
+
+            console.error(
+                "[ALBUMS] Invalid GitHub URL identifier."
+            );
+
+            await showAlbums();
+
+            return;
+
+        }
+
         /*
-         * Store the Pastepile ID so reloadAlbums()
-         * knows which source to load.
+         * Store the decoded GitHub URL so
+         * reloadAlbums() knows which source to load.
          */
 
-        currentPastepileID =
+        currentGithubID =
             pasteID;
 
         /*
-         * Load the albums from Pastepile.
+         * Load the albums from GitHub.
          */
 
         await reloadAlbums();
@@ -198,7 +211,7 @@ async function initAlbums() {
             );
 
         /*
-         * Load MANUAL_ALBUMS / Pastepile albums /
+         * Load MANUAL_ALBUMS / GitHub albums /
          * localStorage albums.
          */
 
@@ -536,12 +549,12 @@ async function showAlbums() {
 
     /*
      * -------------------------------------------------
-     * PRESERVE PASTEPILE URL
+     * PRESERVE GITHUB URL
      * -------------------------------------------------
      *
      * If the page was opened with:
      *
-     * ?@PASTEPILE_ID
+     * ?@BASE64_GITHUB_URL
      *
      * keep that query in the URL.
      *
@@ -1173,7 +1186,7 @@ function openAlbumInput() {
 //document.querySelectorAll(".thumb").forEach((el)=>{el.alt.split(",").forEach((tag)=>{if (!currentAlbum.tags.includes(tag)) {currentAlbum.tags.push(tag)}})})
 
 //remember:
-//?@pastepileID
+//?@githubID
 //?$albumID
 //?=unsavedID
 
@@ -3796,12 +3809,12 @@ async function reloadAlbums() {
 
     /*
      * -------------------------------------------------
-     * PASTEPILE ID
+     * GITHUB URL
      * -------------------------------------------------
      */
 
-    const PASTEPILE_STORAGE_KEY =
-        "pastepileID";
+    const GITHUB_STORAGE_KEY =
+        "githubID";
 
     const query =
         window.location.search.substring(1);
@@ -3810,9 +3823,9 @@ async function reloadAlbums() {
         null;
 
     /*
-     * Explicit Pastepile ID in URL:
+     * Explicit GitHub URL in URL:
      *
-     * ?@pastepileID
+     * ?@BASE64_GITHUB_URL
      */
 
     if (
@@ -3820,28 +3833,40 @@ async function reloadAlbums() {
     ) {
 
         pasteID =
-            decodeURIComponent(
+            decodeBase64URL(
                 query.substring(1)
             );
 
-        /*
-         * Save it for future page loads.
-         */
+        if (
+            !pasteID
+        ) {
 
-        localStorage.setItem(
-            PASTEPILE_STORAGE_KEY,
-            pasteID
-        );
+            console.error(
+                "[ALBUMS] Invalid GitHub URL identifier."
+            );
 
-        /*console.log(
-            "[ALBUMS] Saved Pastepile ID:",
-            pasteID
-        );*/
+            pasteID =
+                null;
+
+        }
+        else {
+
+            /*
+             * Save the decoded GitHub URL for
+             * future page loads.
+             */
+
+            localStorage.setItem(
+                GITHUB_STORAGE_KEY,
+                pasteID
+            );
+
+        }
 
     }
 
     /*
-     * No Pastepile ID in URL.
+     * No GitHub URL in the current URL.
      *
      * Try the previously saved one.
      */
@@ -3850,17 +3875,8 @@ async function reloadAlbums() {
 
         pasteID =
             localStorage.getItem(
-                PASTEPILE_STORAGE_KEY
+                GITHUB_STORAGE_KEY
             );
-
-        if (pasteID) {
-
-            /*console.log(
-                "[ALBUMS] Using saved Pastepile ID:",
-                pasteID
-            );*/
-
-        }
 
     }
 
@@ -3874,7 +3890,7 @@ async function reloadAlbums() {
 
     /*
      * -------------------------------------------------
-     * PASTEPILE
+     * GITHUB
      * -------------------------------------------------
      */
 
@@ -3882,14 +3898,9 @@ async function reloadAlbums() {
 
         try {
 
-            /*console.log(
-                "[ALBUMS] Loading Pastepile:",
-                pasteID
-            );*/
-
             const response =
                 await fetch(
-                    `https://www.pastepile.com/raw/${pasteID}`
+                    pasteID
                 );
 
             if (!response.ok) {
@@ -3902,11 +3913,6 @@ async function reloadAlbums() {
 
             const text =
                 await response.text();
-
-            /*console.log(
-                "[ALBUMS] Pastepile text received:",
-                text
-            );*/
 
             /*
              * -------------------------------------------------
@@ -3924,7 +3930,7 @@ async function reloadAlbums() {
             ) {
 
                 throw new Error(
-                    "MANUAL_ALBUMS was not found in Pastepile."
+                    "MANUAL_ALBUMS was not found in GitHub file."
                 );
 
             }
@@ -4070,14 +4076,6 @@ async function reloadAlbums() {
                     arrayEnd + 1
                 );
 
-            /*console.log(
-                "[ALBUMS] Extracted MANUAL_ALBUMS:"
-            );*/
-
-            /*console.log(
-                arrayText
-            );*/
-
             /*
              * -------------------------------------------------
              * CONVERT TEXT TO ARRAY
@@ -4101,16 +4099,11 @@ async function reloadAlbums() {
 
             }
 
-            /*console.log(
-                "[ALBUMS] Parsed Pastepile albums:",
-                manualAlbums.length
-            );*/
-
         }
         catch (error) {
 
             console.error(
-                "[ALBUMS] Pastepile error:",
+                "[ALBUMS] GitHub error:",
                 error
             );
 
@@ -4127,7 +4120,7 @@ async function reloadAlbums() {
      * -------------------------------------------------
      *
      * Only use the local MANUAL_ALBUMS when there
-     * is no saved/explicit Pastepile ID.
+     * is no saved/explicit GitHub URL.
      */
 
     else if (
@@ -4142,7 +4135,7 @@ async function reloadAlbums() {
 
     /*
      * -------------------------------------------------
-     * ADD MANUAL / PASTEPILE ALBUMS
+     * ADD MANUAL / GITHUB ALBUMS
      * -------------------------------------------------
      */
 
@@ -11054,4 +11047,43 @@ function scheduleCenterReturn() {
 
         }, 3000);
 
+}
+
+function encodeBase64URL(text) {
+    const bytes = new TextEncoder().encode(text);
+
+    let binary = "";
+    for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+    }
+
+    return btoa(binary)
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+}
+
+function decodeBase64URL(encoded) {
+    try {
+        encoded = encoded
+            .replace(/-/g, "+")
+            .replace(/_/g, "/");
+
+        // Restore Base64 padding
+        while (encoded.length % 4)
+            encoded += "=";
+
+        const binary = atob(encoded);
+
+        const bytes = Uint8Array.from(
+            binary,
+            char => char.charCodeAt(0)
+        );
+
+        return new TextDecoder().decode(bytes);
+
+    } catch (error) {
+        console.error("[BASE64] Decode failed:", error);
+        return null;
+    }
 }
