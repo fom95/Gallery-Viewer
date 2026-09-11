@@ -64,5 +64,36 @@
 	</footer>
 </body>
 
+<script type="module">
 
-<script src="script.js"></script>
+    const {
+        Client,
+        StorageIndexedDB
+    } = await import(
+        "https://esm.sh/@mtkruto/browser"
+    );
+
+
+    window.TelegramClient =
+        Client;
+
+    window.TelegramStorageIndexedDB =
+        StorageIndexedDB;
+
+
+    console.log(
+        "[TELEGRAM] MTKruto loaded."
+    );
+
+
+    const script =
+        document.createElement("script");
+
+    script.src =
+        "./script.js";
+
+    document.body.appendChild(
+        script
+    );
+
+</script>

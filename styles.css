@@ -729,3 +729,37 @@ button {
 .album-add-image:hover {
     transform: scale(1.05);
 }
+
+.image-remove {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    z-index: 10;
+
+    width: 24px;
+    height: 24px;
+
+    padding: 0;
+
+    border: none;
+    border-radius: 50%;
+
+    background: rgba(0, 0, 0, 0.75);
+    color: white;
+
+    font-size: 18px;
+    line-height: 24px;
+
+    cursor: pointer;
+}
+
+.album-delete-edited {
+    background: #d6a500 !important;
+    color: black !important;
+}
+
+#albumInputOverlay {
+	justify-content: center;
+	bottom: 50px;
+	position: sticky;
+}

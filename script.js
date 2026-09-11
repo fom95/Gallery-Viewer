@@ -1,4 +1,3 @@
-//FIX THUMBNAIL AND MEDIUM LOADER
 const albums = [];
 let currentAlbum = null;
 let isQueryAlbum = false;
@@ -8,14 +7,14 @@ let activeImageLoaders = [];
 let loadingTimer = null;
 const selectedTags = new Set();
 const excludedTags = new Set();
-let filterMode = "any"; // "any" or "all"
+let filterMode = "any";
 
-const galleryGap = 1; // 1% of gallery width
+const galleryGap = 1;
 const minColumns = 2;
-const maxColumns = 10;
+const maxColumns = 5;
 const minThumbWidth = 180;
 const homeMinColumns = 2;
-const homeMaxColumns = 10;
+const homeMaxColumns = 5;
 const homeMinThumbWidth = 180;
 const homeHeightMultiplier = 1.12;
 let currentTemporaryAlbumID = null;
@@ -49,12 +48,10 @@ function generateAlbumID(name, currentID) {
         .replace(/[^\w -]/g, "")
         .replace(/\s+/g, "_");
 
-    // The base ID is available
     if (!usedIDs.has(base)) {
         return base;
     }
 
-    // Base exists elsewhere, so find the first available number
     let number = 1;
     while (usedIDs.has(base + number)) {
         number++;
@@ -68,26 +65,11 @@ function getAlbumQuery(url) {
     if (!url)
         return "";
 
-    /*
-     * Full URL containing an album query.
-     *
-     * Example:
-     *
-     * https://example.com/?$ALBUM_ID
-     *
-     * Only strip the "?$" routing prefix if it
-     * actually exists.
-     */
-
     if (url.includes("?$")) {
 
         return url.split("?$")[1];
 
     }
-
-    /*
-     * Full URL containing a normal ImgBB query.
-     */
 
     if (url.includes("?")) {
 
@@ -95,60 +77,251 @@ function getAlbumQuery(url) {
 
     }
 
-    /*
-     * Already just the query.
-     */
-
     return url;
 
 }
 
 async function initAlbums() {
 
-    /*
-     * Keep the query encoded.
-     *
-     * Routing:
-     *
-     * ?$ALBUM_ID
-     *     Saved/manual album
-     *
-     * ?@BASE64_GITHUB_URL
-     *     GitHub album database
-     *
-     * ?=ALBUM_ID
-     *     Unsaved/local album
-     *
-     * Anything else:
-     *     Existing ImgBB image-query URL
-     */
-
     const query =
         location.search.substring(1);
 
+    if (
+        !window.telegramAppId ||
+        !window.telegramAppHash
+    ) {
+
+        const savedTelegramAppID =
+            localStorage.getItem("telegram_app_id");
+
+        const savedTelegramAppHash =
+            localStorage.getItem("telegram_app_hash");
+
+        if (
+            savedTelegramAppID &&
+            savedTelegramAppHash
+        ) {
+
+            const appID =
+                Number(savedTelegramAppID);
+
+            if (
+                Number.isInteger(appID) &&
+                appID > 0
+            ) {
+
+                window.telegramAppId =
+                    appID;
+
+                window.telegramAppHash =
+                    savedTelegramAppHash;
+
+            }
+
+        }
+
+    }
+
+    if (
+        window.telegramAppId &&
+        window.telegramAppHash &&
+        !window.telegramClient
+    ) {
+
+        try {
+
+            await initializeTelegramClient();
+
+        }
+        catch (error) {
+
+            alert(
+                "Telegram initialization failed:\n\n" +
+                (
+                    error &&
+                    error.message
+                        ? error.message
+                        : String(error)
+                )
+            );
+
+        }
+
+    }
+
     if (!query) {
-		
-		await reloadAlbums();
+
+        await reloadAlbums();
+
         await showAlbums();
 
         return;
 
     }
 
-    /*
-     * -------------------------------------------------
-     * GITHUB ALBUM DATABASE
-     * -------------------------------------------------
-     */
+    if (
+        query.includes("gh=") ||
+        query.includes("tg=")
+    ) {
+
+        const params =
+            new URLSearchParams(query);
+
+        const githubEncoded =
+            params.get("gh");
+
+        if (githubEncoded) {
+
+            const githubURL =
+                decodeBase64URL(githubEncoded);
+
+            if (githubURL) {
+
+                currentGithubID =
+                    githubURL;
+
+            }
+            else {
+
+            }
+
+        }
+
+        const telegramEncoded =
+            params.get("tg");
+
+        if (telegramEncoded) {
+
+            try {
+
+                const telegramJSON =
+                    decodeBase64URL(telegramEncoded);
+
+                if (!telegramJSON) {
+
+                    throw new Error("Invalid Base64 Telegram data.");
+
+                }
+
+                const telegramInfo =
+                    JSON.parse(telegramJSON);
+
+                if (
+                    telegramInfo.app_id === undefined ||
+                    telegramInfo.app_hash === undefined
+                ) {
+
+                    throw new Error("Telegram data must contain app_id and app_hash.");
+
+                }
+
+                const appID =
+                    Number(telegramInfo.app_id);
+
+                if (
+                    !Number.isInteger(appID) ||
+                    appID <= 0
+                ) {
+
+                    throw new Error("Invalid Telegram app_id.");
+
+                }
+
+                if (
+                    typeof telegramInfo.app_hash !==
+                    "string" ||
+                    !telegramInfo.app_hash
+                ) {
+
+                    throw new Error("Invalid Telegram app_hash.");
+
+                }
+
+                localStorage.setItem(
+                    "telegram_app_id",
+                    String(appID)
+                );
+
+                localStorage.setItem(
+                    "telegram_app_hash",
+                    telegramInfo.app_hash
+                );
+
+                window.telegramAppId =
+                    appID;
+
+                window.telegramAppHash =
+                    telegramInfo.app_hash;
+
+                if (
+                    window.telegramAppId &&
+                    window.telegramAppHash &&
+                    !window.telegramClient
+                ) {
+
+                    await initializeTelegramClient();
+
+                }
+
+            }
+            catch (error) {
+
+                alert(
+                    "Telegram initialization failed:\n\n" +
+                    (
+                        error &&
+                        error.message
+                            ? error.message
+                            : String(error)
+                    )
+                );
+
+            }
+
+        }
+
+        params.delete("gh");
+        params.delete("tg");
+
+        const remainingQuery =
+            params.toString();
+
+        const cleanURL =
+            location.pathname +
+            (
+                remainingQuery
+                    ? "?" + remainingQuery
+                    : ""
+            ) +
+            location.hash;
+
+        history.replaceState(
+            null,
+            "",
+            cleanURL
+        );
+
+        if (currentGithubID) {
+
+            await reloadAlbums();
+
+            await showAlbums(false);
+
+            return;
+
+        }
+
+        await reloadAlbums();
+
+        await showAlbums();
+
+        return;
+
+    }
 
     if (
         query.startsWith("@")
     ) {
-
-        /*
-         * The Base64URL encoded GitHub URL is
-         * everything after @.
-         */
 
         const pasteID =
             decodeBase64URL(
@@ -157,49 +330,22 @@ async function initAlbums() {
 
         if (!pasteID) {
 
-            console.error(
-                "[ALBUMS] Invalid GitHub URL identifier."
-            );
-
             await showAlbums();
 
             return;
 
         }
 
-        /*
-         * Store the decoded GitHub URL so
-         * reloadAlbums() knows which source to load.
-         */
-
         currentGithubID =
             pasteID;
 
-        /*
-         * Load the albums from GitHub.
-         */
-
         await reloadAlbums();
 
-        /*
-         * Now display the album list.
-         */
-
-        await showAlbums(
-            false
-        );
+        await showAlbums(false);
 
         return;
 
     }
-
-    /*
-     * -------------------------------------------------
-     * MANUAL / SAVED ALBUM
-     * -------------------------------------------------
-     *
-     * ?$ALBUM_ID
-     */
 
     if (
         query.startsWith("$")
@@ -209,11 +355,6 @@ async function initAlbums() {
             decodeURIComponent(
                 query.substring(1)
             );
-
-        /*
-         * Load MANUAL_ALBUMS / GitHub albums /
-         * localStorage albums.
-         */
 
         await reloadAlbums();
 
@@ -231,22 +372,13 @@ async function initAlbums() {
             isQueryAlbum =
                 false;
 
-            loadAlbumFromURL(
-                album
-            );
+            loadAlbum(album, false);
 
-            showAlbumButtons(
-                true
-            );
+            showAlbumButtons(true);
 
             return;
 
         }
-
-        console.warn(
-            "Album not found:",
-            albumID
-        );
 
         await showAlbums();
 
@@ -254,79 +386,47 @@ async function initAlbums() {
 
     }
 
-	/*
-	 * -------------------------------------------------
-	 * TEMPORARY ALBUM
-	 * -------------------------------------------------
-	 *
-	 * ?=ALBUM_ID
-	 *
-	 * The actual album data is stored temporarily in
-	 * localStorage. The URL only contains its ID.
-	 */
+    if (
+        query.startsWith("=")
+    ) {
 
-	if (
-		query.startsWith("=")
-	) {
+        const albumID =
+            decodeURIComponent(
+                query.substring(1)
+            );
 
-		const albumID =
-			decodeURIComponent(
-				query.substring(1)
-			);
+        const album =
+            getTemporaryAlbum(albumID);
 
-		const album =
-			getTemporaryAlbum(
-				albumID
-			);
+        if (
+            album
+        ) {
 
-		if (
-			album
-		) {
-			currentTemporaryAlbumID =
-				albumID;
+            currentTemporaryAlbumID =
+                albumID;
 
-			currentAlbum =
-				album;
+            currentAlbum =
+                album;
 
-			isQueryAlbum =
-				false;
+            isQueryAlbum =
+                false;
 
-			loadAlbumFromURL(
-				album
-			);
+            loadAlbum(album, false);
 
-			showAlbumButtons(
-				true
-			);
+            showAlbumButtons(true);
 
-			return;
+            return;
 
-		}
+        }
 
-		console.warn(
-			"Temporary album not found:",
-			albumID
-		);
+        await showAlbums();
 
-		await showAlbums();
+        return;
 
-		return;
-
-	}
-
-    /*
-     * -------------------------------------------------
-     * EXISTING IMGBB QUERY
-     * -------------------------------------------------
-     *
-     * Anything that doesn't use one of the special
-     * prefixes is still treated as an ImgBB query.
-     */
+    }
 
     const albumQuery =
-        createQueryAlbum(
-            query
-        );
+        createQueryAlbum(query);
 
     currentAlbum =
         albumQuery;
@@ -334,13 +434,9 @@ async function initAlbums() {
     isQueryAlbum =
         true;
 
-    loadAlbumFromURL(
-        albumQuery
-    );
+    loadAlbum(albumQuery, false);
 
-    showAlbumButtons(
-        true
-    );
+    showAlbumButtons(true);
 
 }
 
@@ -358,94 +454,121 @@ function parseQuery(query) {
 
     return query.split("|").map(entry => {
 
-        /*
-         * -----------------------------------------
-         * NEW JSON FORMAT
-         * -----------------------------------------
-         */
         try {
 
             const data =
                 JSON.parse(
-                    decodeURIComponent(entry));
+                    decodeURIComponent(entry)
+                );
 
-            /*
-             * Keep the filename EXACTLY as stored.
-             *
-             * Do not decode it again.
-             */
+            if (
+                data.source ===
+                "telegram"
+            ) {
+
+                return {
+
+                    source:
+                        "telegram",
+
+                    messageID:
+                        data.messageID ||
+                        data.messageId ||
+                        null,
+
+                    telegramFileID:
+                        data.telegramFileID ||
+                        data.fileID ||
+                        data.fileId ||
+                        null,
+
+                    telegramThumbnailFileID:
+                        data.telegramThumbnailFileID ||
+                        data.thumbnailFileID ||
+                        data.thumbnailFileId ||
+                        null,
+
+                    mimeType:
+                        data.mimeType ||
+                        "",
+
+                    fileName:
+                        data.n ||
+                        data.fileName ||
+                        "",
+
+                    width:
+                        data.width,
+
+                    height:
+                        data.height,
+
+                    tags:
+                        (data.d?.tags || data.tags || [])
+                        .map(
+                            tag =>
+                                decodeURIComponent(tag)
+                        )
+
+                };
+
+            }
+
             const fileName =
                 data.n || "";
 
-            /*
-             * Build URLs only when the ID exists.
-             *
-             * This prevents:
-             *
-             * https://i.ibb.co//filename.jpg
-             */
             const thumbURL =
                 data.t
-                 ? `https://i.ibb.co/${data.t}/${fileName}`
-                 : null;
+                    ? `https://i.ibb.co/${data.t}/${fileName}`
+                    : null;
 
             const mediumURL =
                 data.m
-                 ? `https://i.ibb.co/${data.m}/${fileName}`
-                 : null;
+                    ? `https://i.ibb.co/${data.m}/${fileName}`
+                    : null;
 
             const fullURL =
                 data.f
-                 ? `https://i.ibb.co/${data.f}/${fileName}`
-                 : null;
-
-            /*
-            console.log(
-            "[QUERY] Parsed image:",{
-            thumbID: data.t,
-            mediumID: data.m,
-            fullID: data.f,
-            fileName: fileName,
-            thumbURL: thumbURL,
-            mediumURL: mediumURL,
-            fullURL: fullURL
-            }
-            );
-             */
+                    ? `https://i.ibb.co/${data.f}/${fileName}`
+                    : null;
 
             return {
 
-                thumb: thumbURL
-                 ? {
-                    url: thumbURL
-                }
-                 : null,
+                thumb:
+                    thumbURL
+                        ? {
+                            url:
+                                thumbURL
+                        }
+                        : null,
 
-                medium: mediumURL
-                 ? {
-                    url: mediumURL
-                }
-                 : null,
+                medium:
+                    mediumURL
+                        ? {
+                            url:
+                                mediumURL
+                        }
+                        : null,
 
-                image: fullURL
-                 ? {
-                    url: fullURL
-                }
-                 : null,
+                image:
+                    fullURL
+                        ? {
+                            url:
+                                fullURL
+                        }
+                        : null,
 
                 tags:
-                (data.d?.tags || [])
-                .map(tag => decodeURIComponent(tag))
+                    (data.d?.tags || [])
+                    .map(
+                        tag =>
+                            decodeURIComponent(tag)
+                    )
 
             };
 
         }
 
-        /*
-         * -----------------------------------------
-         * OLD FORMAT
-         * -----------------------------------------
-         */
         catch (e) {
 
             const [
@@ -459,36 +582,38 @@ function parseQuery(query) {
             return {
 
                 thumb:
-                thumbId
-                 ? {
-                    url:
-`https://i.ibb.co/${thumbId}/${fileName}`
-                }
-                 : null,
+                    thumbId
+                        ? {
+                            url:
+                                `https://i.ibb.co/${thumbId}/${fileName}`
+                        }
+                        : null,
 
                 medium:
-                mediumId
-                 ? {
-                    url:
-`https://i.ibb.co/${mediumId}/${fileName}`
-                }
-                 : null,
+                    mediumId
+                        ? {
+                            url:
+                                `https://i.ibb.co/${mediumId}/${fileName}`
+                        }
+                        : null,
 
                 image:
-                imageId
-                 ? {
-                    url:
-`https://i.ibb.co/${imageId}/${fileName}`
-                }
-                 : null,
+                    imageId
+                        ? {
+                            url:
+                                `https://i.ibb.co/${imageId}/${fileName}`
+                        }
+                        : null,
 
-                tags: []
+                tags:
+                    []
 
             };
 
         }
 
     });
+
 }
 
 function createAlbumQuery(album) {
@@ -539,28 +664,11 @@ async function showAlbums() {
     document.getElementById("tagToggle").style.display =
         "none";
 
-    //closeModal();
-
     document.getElementById("pageName").textContent =
         "ImgBB Galleries";
 
     document.title =
         "Gallery Viewer";
-
-    /*
-     * -------------------------------------------------
-     * PRESERVE GITHUB URL
-     * -------------------------------------------------
-     *
-     * If the page was opened with:
-     *
-     * ?@BASE64_GITHUB_URL
-     *
-     * keep that query in the URL.
-     *
-     * For normal album-list pages, continue removing
-     * the query exactly as before.
-     */
 
     const currentQuery =
         window.location.search;
@@ -582,8 +690,8 @@ async function showAlbums() {
 
     currentAlbum =
         null;
-		
-	stopThumbnailLoading();
+
+    stopThumbnailLoading();
 
     thumbnailItems =
         [];
@@ -591,25 +699,16 @@ async function showAlbums() {
     thumbnailQueue =
         [];
 
-    /*
-     * -------------------------------------------------
-     * LOAD ALBUMS
-     * -------------------------------------------------
-     */
+    if (!albums.length) {
 
-    //await reloadAlbums();
-	
-	
-	if (!albums.length) {
+        await reloadAlbums();
 
-    await reloadAlbums();
+    }
+    else {
 
-}
-	else {
+        refreshSavedAlbums();
 
-		refreshSavedAlbums();
-
-	}
+    }
 
     document.getElementById("backButton").style.display =
         "none";
@@ -635,61 +734,209 @@ async function showAlbums() {
     albums.forEach(
         album => {
 
-            const cover =
-                album.images[
-                    Math.floor(
-                        Math.random() *
-                        album.images.length
-                    )
-                ];
+            const isTelegram =
+                typeof album.url === "string" &&
+                album.url.startsWith("tg://chat/");
+
+            let cover =
+                null;
+
+            if (
+                !isTelegram &&
+                album.images &&
+                album.images.length
+            ) {
+
+                cover =
+                    album.images[
+                        Math.floor(
+                            Math.random() *
+                            album.images.length
+                        )
+                    ];
+
+            }
 
             const card =
-                document.createElement(
-                    "div"
-                );
+                document.createElement("div");
 
             card.className =
                 "album";
 
             const img =
-                document.createElement(
-                    "img"
-                );
+                document.createElement("img");
 
-            img.src =
-                cover.thumb.url;
+            if (
+                !isTelegram &&
+                cover &&
+                cover.thumb &&
+                cover.thumb.url
+            ) {
+
+                img.src =
+                    cover.thumb.url;
+
+            }
+
+            if (
+                isTelegram
+            ) {
+
+                img.style.visibility =
+                    "hidden";
+
+            }
 
             const title =
-                document.createElement(
-                    "div"
-                );
+                document.createElement("div");
 
             title.textContent =
                 album.name;
 
-            card.appendChild(
-                img
-            );
+            card.appendChild(img);
 
-            card.appendChild(
-                title
-            );
+            card.appendChild(title);
 
             card.onclick =
                 () => loadAlbum(album);
 
-            /*
-             * -------------------------------------------------
-             * LOCALSTORAGE ALBUM BUTTONS
-             * -------------------------------------------------
-             */
+            if (
+                isTelegram
+            ) {
 
-            if (album.storage) {
+                const exportBtn =
+                    document.createElement("button");
+
+                exportBtn.className =
+                    "album-export";
+
+                exportBtn.textContent =
+                    "↗";
+
+                exportBtn.title =
+                    "Copy Telegram album record";
+
+                exportBtn.onclick =
+                    async (e) => {
+
+                        e.stopPropagation();
+
+                        try {
+
+                            if (
+                                album._telegramLoadPromise
+                            ) {
+
+                                await album._telegramLoadPromise;
+
+                            }
+                            else {
+
+                                await loadTelegramAlbum(album);
+
+                            }
+
+                            if (
+                                !album._telegramMessageIDs ||
+                                !album._telegramMessageIDs.length
+                            ) {
+
+                                alert("No Telegram image messages were found.");
+
+                                return;
+
+                            }
+
+                            const match =
+                                album.url.match(
+                                    /^tg:\/\/chat\/(-?\d+)/
+                                );
+
+                            if (!match) {
+
+                                alert("Invalid Telegram album URL.");
+
+                                return;
+
+                            }
+
+                            const chatId =
+                                match[1];
+
+                            const coverID =
+                                album._telegramCoverMessageID ||
+                                album._telegramMessageIDs[0];
+
+                            const messageIDs =
+                                album._telegramMessageIDs.join(",");
+
+                            const id =
+                                generateAlbumID(album.name);
+
+                            const js =
+                                `,
+	{
+		id: "${id.replace(
+							/"/g,
+							'\\"'
+						)}",
+		name: "${album.name.replace(
+							/"/g,
+							'\\"'
+						)}",
+		url: \`
+		tg://chat/${chatId}?cover=${coverID}&messages=${messageIDs}
+		\`.trim(),
+		tags: ${JSON.stringify(album.tags || [])}
+	}`;
+
+                            navigator.clipboard
+                                .writeText(js)
+                                .then(
+                                    () => {
+
+                                        alert("Copied Telegram album entry!");
+
+                                    }
+                                )
+                                .catch(
+                                    () => {
+
+                                        prompt(
+                                            "Copy this:",
+                                            js
+                                        );
+
+                                    }
+                                );
+
+                        }
+                        catch (error) {
+
+							alert(
+								"Failed to load Telegram album data:\n\n" +
+								(
+									error &&
+									error.message
+										? error.message
+										: String(error)
+								)
+							);
+
+						}
+
+                    };
+
+                card.appendChild(exportBtn);
+
+            }
+
+            if (
+                album.storage
+            ) {
 
                 const deleteBtn =
-                    document.createElement(
-                        "button"
-                    );
+                    document.createElement("button");
 
                 deleteBtn.className =
                     "album-delete";
@@ -698,7 +945,17 @@ async function showAlbums() {
                     "×";
 
                 deleteBtn.title =
-                    "Remove saved album";
+                    album.edited
+                        ? "Delete local edits"
+                        : "Remove saved album";
+
+                if (
+                    album.edited
+                ) {
+
+                    deleteBtn.classList.add("album-delete-edited");
+
+                }
 
                 deleteBtn.onclick =
                     (e) => {
@@ -707,9 +964,7 @@ async function showAlbums() {
 
                         let saved =
                             JSON.parse(
-                                localStorage.getItem(
-                                    "savedAlbums"
-                                ) || "[]"
+                                localStorage.getItem("savedAlbums") || "[]"
                             );
 
                         saved =
@@ -721,165 +976,162 @@ async function showAlbums() {
 
                         localStorage.setItem(
                             "savedAlbums",
-                            JSON.stringify(
-                                saved
-                            )
+                            JSON.stringify(saved)
                         );
 
                         showAlbums();
 
                     };
 
-                card.appendChild(
-                    deleteBtn
-                );
+                card.appendChild(deleteBtn);
 
-                const exportBtn =
-                    document.createElement(
-                        "button"
-                    );
+                if (
+                    album.edited
+                ) {
 
-                exportBtn.className =
-                    "album-export";
+                    const exportBtn =
+                        document.createElement("button");
 
-                exportBtn.textContent =
-                    "↗";
+                    exportBtn.className =
+                        "album-export";
 
-                exportBtn.title =
-                    "Copy to albums.js";
+                    exportBtn.textContent =
+                        "↗";
 
-                exportBtn.onclick =
-                    (e) => {
+                    exportBtn.title =
+                        "Copy to albums.js";
 
-                        e.stopPropagation();
+                    exportBtn.onclick =
+                        (e) => {
 
-                        const query =
-                            createAlbumQuery(
-                                album
-                            );
+                            e.stopPropagation();
 
-                        const id =
-                            generateAlbumID(
-                                album.name
-                            );
+                            const query =
+                                createAlbumQuery(album);
 
-                        const js =
-                            `,
+                            const id =
+                                generateAlbumID(album.name);
+
+                            const js =
+                                `,
 	{
 		id: "${id.replace(
-            /"/g,
-            '\\"'
-        )}",
+							/"/g,
+							'\\"'
+						)}",
 		name: "${album.name.replace(
-            /"/g,
-            '\\"'
-        )}",
+							/"/g,
+							'\\"'
+						)}",
 		url: \`
 		?${query}
 		\`.trim(),
-		tags: ${JSON.stringify(
-            album.tags || []
-        )}
+		tags: ${JSON.stringify(album.tags || [])}
 	}`;
 
-                        navigator.clipboard
-                            .writeText(js)
-                            .then(
-                                () => {
-                                    alert(
-                                        "Copied album.js entry!"
-                                    );
-                                }
-                            )
-                            .catch(
-                                () => {
-                                    prompt(
-                                        "Copy this:",
-                                        js
-                                    );
-                                }
-                            );
+                            navigator.clipboard
+                                .writeText(js)
+                                .then(
+                                    () => {
 
-                    };
+                                        alert("Copied album.js entry!");
 
-                card.appendChild(
-                    exportBtn
-                );
+                                    }
+                                )
+                                .catch(
+                                    () => {
+
+                                        prompt(
+                                            "Copy this:",
+                                            js
+                                        );
+
+                                    }
+                                );
+
+                        };
+
+                    card.appendChild(exportBtn);
+
+                }
 
             }
 
-            gallery.appendChild(
-                card
-            );
+            gallery.appendChild(card);
+
+            if (
+                isTelegram &&
+                window.telegramClient
+            ) {
+
+                album._telegramCoverPromise =
+					loadTelegramAlbumCover(album);
+
+				album._telegramCoverPromise
+					.then(
+						result => {
+
+							img.src =
+								result.url;
+
+							img.style.visibility =
+								"visible";
+
+						}
+					)
+					.catch(
+						error => {
+
+						}
+					);
+
+            }
 
         }
     );
 
-	/*
-	 * -------------------------------------------------
-	 * ADD ALBUM BUTTON
-	 * -------------------------------------------------
-	 *
-	 * Always appears after every normal album.
-	 */
+    const addCard =
+        document.createElement("div");
 
-	const addCard =
-		document.createElement("div");
+    addCard.className =
+        "album album-add";
 
-	addCard.className =
-		"album album-add";
+    const addImage =
+        document.createElement("div");
 
-	const addImage =
-		document.createElement("div");
+    addImage.className =
+        "album-add-image";
 
-	addImage.className =
-		"album-add-image";
+    addImage.textContent =
+        "+";
 
-	addImage.textContent =
-		"+";
+    const addTitle =
+        document.createElement("div");
 
-	const addTitle =
-		document.createElement("div");
+    addTitle.textContent =
+        "Add New";
 
-	addTitle.textContent =
-		"Add New";
+    addCard.appendChild(addImage);
 
-	addCard.appendChild(
-		addImage
-	);
+    addCard.appendChild(addTitle);
 
-	addCard.appendChild(
-		addTitle
-	);
+    addCard.onclick =
+        () => {
 
-	addCard.onclick =
-		() => {
+            openAlbumInput();
 
-			openAlbumInput();
+        };
 
-		};
+    gallery.appendChild(addCard);
 
-	gallery.appendChild(
-		addCard
-	);
+    applyGalleryLayout(false);
 
-    applyGalleryLayout(
-        false
-    );
+    document.documentElement.classList.remove("pageLoading");
 
-    document.documentElement.classList.remove(
-        "pageLoading"
-    );
-
+    showAddImageButton();
 }
 
 function refreshSavedAlbums() {
-
-    /*
-     * -------------------------------------------------
-     * REMOVE CURRENTLY CACHED LOCALSTORAGE ALBUMS
-     * -------------------------------------------------
-     */
 
     for (
         let i = albums.length - 1;
@@ -900,24 +1152,10 @@ function refreshSavedAlbums() {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * READ CURRENT SAVED ALBUMS
-     * -------------------------------------------------
-     */
-
     const saved =
         JSON.parse(
-            localStorage.getItem(
-                "savedAlbums"
-            ) || "[]"
+            localStorage.getItem("savedAlbums") || "[]"
         );
-
-    /*
-     * -------------------------------------------------
-     * ADD CURRENT LOCALSTORAGE ALBUMS
-     * -------------------------------------------------
-     */
 
     saved.forEach(
         album => {
@@ -946,9 +1184,7 @@ function returnToAlbums() {
         currentTemporaryAlbumID
     ) {
 
-        deleteTemporaryAlbum(
-            currentTemporaryAlbumID
-        );
+        deleteTemporaryAlbum(currentTemporaryAlbumID);
 
         currentTemporaryAlbumID =
             null;
@@ -982,15 +1218,12 @@ const TEMP_ALBUM_STORAGE_KEY =
 function getTemporaryAlbums() {
 
     return JSON.parse(
-        localStorage.getItem(
-            TEMP_ALBUM_STORAGE_KEY
-        ) || "{}"
+        localStorage.getItem(TEMP_ALBUM_STORAGE_KEY) || "{}"
     );
 
 }
 
-function saveTemporaryAlbum(
-    album) {
+function saveTemporaryAlbum(album) {
 
     const temporaryAlbums =
         getTemporaryAlbums();
@@ -1000,15 +1233,12 @@ function saveTemporaryAlbum(
 
     localStorage.setItem(
         TEMP_ALBUM_STORAGE_KEY,
-        JSON.stringify(
-            temporaryAlbums
-        )
+        JSON.stringify(temporaryAlbums)
     );
 
 }
 
-function getTemporaryAlbum(
-    id) {
+function getTemporaryAlbum(id) {
 
     const temporaryAlbums =
         getTemporaryAlbums();
@@ -1018,8 +1248,7 @@ function getTemporaryAlbum(
 
 }
 
-function deleteTemporaryAlbum(
-    id) {
+function deleteTemporaryAlbum(id) {
 
     if (!id)
         return;
@@ -1039,9 +1268,7 @@ function deleteTemporaryAlbum(
 
     localStorage.setItem(
         TEMP_ALBUM_STORAGE_KEY,
-        JSON.stringify(
-            temporaryAlbums
-        )
+        JSON.stringify(temporaryAlbums)
     );
 
 }
@@ -1049,9 +1276,7 @@ function deleteTemporaryAlbum(
 function openAlbumInput() {
 
     let overlay =
-        document.getElementById(
-            "albumInputOverlay"
-        );
+        document.getElementById("albumInputOverlay");
 
     if (overlay) {
 
@@ -1063,9 +1288,7 @@ function openAlbumInput() {
     }
 
     overlay =
-        document.createElement(
-            "div"
-        );
+        document.createElement("div");
 
     overlay.id =
         "albumInputOverlay";
@@ -1084,6 +1307,25 @@ function openAlbumInput() {
                 autocomplete="off"
             >
 
+            <div
+                style="
+                    margin: 12px 0;
+                    text-align: center;
+                    opacity: 0.7;
+                "
+            >
+                OR
+            </div>
+
+            <select
+                id="telegramAlbumChat"
+                style="width: 100%;"
+            >
+                <option value="">
+                    Select Telegram chat
+                </option>
+            </select>
+
             <div class="album-input-buttons">
 
                 <button id="albumInputCancel">
@@ -1099,39 +1341,51 @@ function openAlbumInput() {
         </div>
     `;
 
-    document.body.appendChild(
-        overlay
-    );
+    document.body.appendChild(overlay);
 
     const input =
-        document.getElementById(
-            "albumInput"
-        );
+        document.getElementById("albumInput");
+
+    const telegramSelect =
+        document.getElementById("telegramAlbumChat");
 
     const openButton =
-        document.getElementById(
-            "albumInputOpen"
-        );
+        document.getElementById("albumInputOpen");
 
     const cancelButton =
-        document.getElementById(
-            "albumInputCancel"
-        );
+        document.getElementById("albumInputCancel");
+
+    populateTelegramAlbumChats(telegramSelect);
 
     openButton.onclick =
-        () => {
+        async () => {
+
+            const telegramChatID =
+                telegramSelect.value;
 
             const value =
                 input.value.trim();
+
+            if (
+                telegramChatID
+            ) {
+
+                overlay.remove();
+
+                await openTemporaryTelegramAlbum(
+                    Number(telegramChatID)
+                );
+
+                return;
+
+            }
 
             if (!value)
                 return;
 
             overlay.remove();
 
-            openTemporaryAlbumFromURL(
-                value
-            );
+            openTemporaryAlbumFromURL(value);
 
         };
 
@@ -1182,541 +1436,656 @@ function openAlbumInput() {
 
 }
 
-//gets all unique tags, requires all loaded
-//document.querySelectorAll(".thumb").forEach((el)=>{el.alt.split(",").forEach((tag)=>{if (!currentAlbum.tags.includes(tag)) {currentAlbum.tags.push(tag)}})})
+async function loadTelegramAlbum(album) {
 
-//remember:
-//?@githubID
-//?$albumID
-//?=unsavedID
+    if (
+        !window.telegramClient
+    ) {
 
-function loadAlbum(album) {
+        throw new Error("Telegram client is not initialized.");
 
-	selectedTags.clear();
+    }
 
-	document.getElementById("tagBar").style.display =
-		"";
+    const client =
+        window.telegramClient;
 
-	document.getElementById("tagList").innerHTML =
-		"";
+    const match =
+        album.url.match(
+            /^tg:\/\/chat\/(-?\d+)(?:\?(.+))?$/
+        );
 
-	document.getElementById("pageName").innerHTML =
-		album.name;
+    if (!match) {
 
-	document.title =
-		album.name;
+        throw new Error(
+            "Invalid Telegram album URL: " +
+            album.url
+        );
 
-	currentAlbum =
-		album;
+    }
 
-	history.pushState(
-		null,
-		"",
-		"?$" +
-		encodeURIComponent(
-			album.id));
+    const chatId =
+        Number(match[1]);
 
-	showAlbumButtons(
-		true);
+    const optionString =
+        match[2] ||
+        "";
 
-	const gallery =
-		document.getElementById("gallery");
+    const options =
+        new URLSearchParams(optionString);
 
-	gallery.innerHTML =
-		"";
+    const coverMessageID =
+        options.get("cover");
 
-	/*
-	 * -------------------------------------------------
-	 * RESET THUMBNAIL LOADER
-	 * -------------------------------------------------
-	 */
+    const messageString =
+        options.get("messages");
 
-	stopThumbnailLoading();
+    let requestedMessageIDs =
+        [];
 
-	thumbnailItems =
-		[];
+    if (
+        messageString
+    ) {
 
-	thumbnailQueue =
-		[];
+        requestedMessageIDs =
+            messageString
+                .split(",")
+                .map(
+                    id =>
+                        Number(id)
+                )
+                .filter(
+                    id =>
+                        Number.isInteger(id) &&
+                        id > 0
+                );
 
-	thumbnailLoading =
-		false;
+    }
 
-	/*
-	 * -------------------------------------------------
-	 * CREATE ALL THUMBNAIL SLOTS
-	 * -------------------------------------------------
-	 *
-	 * The slots exist immediately so the gallery
-	 * has its complete layout before any images
-	 * are requested.
-	 */
+    let chat =
+        null;
 
-	album.images.forEach(
-		(img, index) => {
+    if (
+        Array.isArray(window.telegramChats)
+    ) {
 
-		if (
-			!img.thumb?.url ||
-			!img.image?.url) {
+        const found =
+            window.telegramChats.find(
+                item =>
+                    item &&
+                    item.chat &&
+                    String(item.chat.id) ===
+                    String(chatId)
+            );
 
-			return;
+        if (found) {
 
-		}
+            chat =
+                found.chat;
 
-		/*
-		 * The slot itself is an image element.
-		 *
-		 * It starts without a src, so the browser
-		 * does not download anything yet.
-		 */
+        }
 
-		const el =
-			document.createElement("div");
+    }
 
-		el.className =
-			"thumbnail-slot";
+    if (!chat) {
 
-		el.dataset.index =
-			index;
+        const chats =
+            await client.getChats();
 
-		el.dataset.thumbnailIndex =
-			index;
+        window.telegramChats =
+            chats;
 
-		el.dataset.src =
-			img.thumb.url;
+        const found =
+            chats.find(
+                item =>
+                    item &&
+                    item.chat &&
+                    String(item.chat.id) ===
+                    String(chatId)
+            );
 
-		el.dataset.loaded =
-			"false";
+        if (found) {
 
-		el.dataset.loading =
-			"false";
+            chat =
+                found.chat;
 
-		el.style.visibility =
-			"hidden";
+        }
 
-		el._thumbnailItem =
-			null;
+    }
 
+    if (!chat) {
 
-		/*
-		 * -------------------------------------------------
-		 * THUMBNAIL IMAGE
-		 * -------------------------------------------------
-		 */
+        throw new Error(
+            "Telegram chat was not found: " +
+            chatId
+        );
 
-		const thumbImg =
-			document.createElement("img");
+    }
 
-		thumbImg.className =
-			"thumb thumbnail-image";
+    let messages =
+        [];
 
-		/*thumbImg.style.visibility =
-			"hidden";*/
+    if (
+        requestedMessageIDs.length
+    ) {
 
+        try {
 
-		/*
-		 * -------------------------------------------------
-		 * MEDIUM IMAGE
-		 * -------------------------------------------------
-		 */
+            const retrievedMessages =
+                await client.getMessages(
+                    chat.id,
+                    requestedMessageIDs
+                );
 
-		const mediumImg =
-			document.createElement("img");
+            const messageMap =
+                new Map();
 
-		mediumImg.className =
-			"thumb medium-image";
+            for (
+                const message of
+                retrievedMessages
+            ) {
 
-		mediumImg.style.visibility =
-			"hidden";
+                if (
+                    message &&
+                    Number.isInteger(message.id)
+                ) {
 
-		mediumImg.style.opacity =
-			"0";
+                    messageMap.set(
+                        message.id,
+                        message
+                    );
 
+                }
 
-		/*
-		 * Medium sits above the thumbnail.
-		 */
+            }
 
-		el.appendChild(
-			thumbImg);
+            messages =
+                requestedMessageIDs
+                    .map(
+                        messageID =>
+                            messageMap.get(messageID)
+                    )
+                    .filter(
+                        message =>
+                            !!message
+                    );
 
-		el.appendChild(
-			mediumImg);
+        }
+        catch (error) {
 
-		gallery.appendChild(
-			el);
+            throw error;
 
-		thumbnailItems.push({
+        }
 
-			index:
-				index,
+    }
+    else {
 
-			slotIndex:
-				gallery.children.length - 1,
+        messages =
+            await client.getHistory(
+                chat.id,
+                {
+                    limit:
+                        100
+                }
+            );
 
-			src:
-				img.thumb.url,
+    }
 
-			tags:
-				img.tags || [],
+    const images =
+        [];
 
-			mediumSrc:
-				img.medium?.url ||
-				img.image?.url ||
-				"",
+    for (
+        const message of
+        messages
+    ) {
 
-			fullSrc:
-				img.image?.url ||
-				"",
+        if (
+            !message ||
+            !message.document
+        ) {
 
-			slot:
-				el,
+            continue;
 
-			img:
-				thumbImg,
+        }
 
-			mediumImg:
-				mediumImg,
+        const fileDocument =
+            message.document;
 
-			loaded:
-				false,
+        const mimeType =
+            fileDocument.mimeType ||
+            "";
 
-			loading:
-				false,
+        if (
+            !mimeType.startsWith("image/")
+        ) {
 
-			assigned:
-				false,
+            continue;
 
-			mediumLoaded:
-				false,
+        }
 
-			mediumLoading:
-				false,
+        let thumbnail =
+            null;
 
-			mediumImage:
-				null
+        if (
+            Array.isArray(fileDocument.thumbnails) &&
+            fileDocument.thumbnails.length
+        ) {
 
-		});
-		const mediumSrc =
-			img.medium?.url ||
-			img.image?.url ||
-			"";
+            thumbnail =
+                fileDocument.thumbnails
+                    .slice()
+                    .sort(
+                        (a, b) =>
+                            (
+                                (b.width || 0) *
+                                (b.height || 0)
+                            ) -
+                            (
+                                (a.width || 0) *
+                                (a.height || 0)
+                            )
+                    )[0];
 
-		mediumItems.push({
+        }
 
-			index:
-				index,
+        images.push({
 
-			src:
-				mediumSrc,
+            source:
+                "telegram",
 
-			mediumLoaded:
-				false,
+            messageID:
+                message.id,
 
-			mediumLoading:
-				false,
+            telegramFileID:
+                fileDocument.fileId,
 
-			mediumImage:
-				mediumImg,
+            telegramThumbnailFileID:
+                thumbnail
+                    ? thumbnail.fileId
+                    : null,
 
-			mediumBlobURL:
-				null
+            mimeType:
+                mimeType,
 
-		});
-	});
+            fileName:
+                fileDocument.fileName ||
+                "",
 
-	if (album.tags?.length) {
+            width:
+                fileDocument.width,
 
-		buildTagList(
-			album.tags);
+            height:
+                fileDocument.height,
 
-	}
+            tags:
+                []
 
-	requestAnimationFrame(() => {
+        });
 
-		requestAnimationFrame(() => {
+    }
 
-			loadTagBarState();
+    album.images =
+        images;
 
-			applyGalleryLayout(
-				false);
+    let coverImage =
+        null;
 
-			/*
-			 * Start only after the gallery has
-			 * actually settled into its layout.
-			 */
+    if (
+        coverMessageID
+    ) {
 
-			startThumbnailLoading();
+        coverImage =
+            images.find(
+                image =>
+                    String(image.messageID) ===
+                    String(coverMessageID)
+            );
 
-		});
+    }
 
-	});
+    if (
+        !coverImage &&
+        images.length
+    ) {
 
-	document.documentElement.classList.remove(
-		"pageLoading");
+        coverImage =
+            images[
+                Math.floor(
+                    Math.random() *
+                    images.length
+                )
+            ];
+
+    }
+
+    album._telegramMessageIDs =
+        images.map(
+            image =>
+                image.messageID
+        );
+
+    album._telegramCoverMessageID =
+        coverImage
+            ? coverImage.messageID
+            : null;
+
+    album._telegramLoaded =
+        true;
 
 }
 
-function loadAlbumFromURL(album) {
-
-	selectedTags.clear();
-
-	document.getElementById("tagBar").style.display =
-		"";
-
-	document.getElementById("tagList").innerHTML =
-		"";
-
-	document.getElementById("pageName").textContent =
-		album.name;
-
-	document.title =
-		album.name;
-
-	currentAlbum =
-		album;
-
-	const gallery =
-		document.getElementById("gallery");
-
-	gallery.innerHTML =
-		"";
-
-	/*
-	 * -------------------------------------------------
-	 * RESET THUMBNAIL LOADER
-	 * -------------------------------------------------
-	 */
-
-	stopThumbnailLoading();
-
-	thumbnailItems =
-		[];
-
-	thumbnailQueue =
-		[];
-
-	thumbnailLoading =
-		false;
-		
-	stopMediumLoading();
-
-	mediumItems =
-		[];
-
-	mediumQueue =
-		[];
-
-	mediumLoading =
-		false;
-
-	/*
-	 * -------------------------------------------------
-	 * CREATE ALL THUMBNAIL SLOTS
-	 * -------------------------------------------------
-	 */
-
-	album.images.forEach(
-		(img, index) => {
-
-		if (
-			!img.thumb?.url ||
-			!img.image?.url) {
-
-			return;
-
-		}
-
-		const el =
-			document.createElement("div");
-
-		el.className =
-			"thumbnail-slot";
-
-		el.dataset.index =
-			index;
-
-		el.dataset.thumbnailIndex =
-			index;
-
-		el.dataset.src =
-			img.thumb.url;
-
-		el.dataset.loaded =
-			"false";
-
-		el.dataset.loading =
-			"false";
-
-		el.style.visibility =
-			"hidden";
-
-		el._thumbnailItem =
-			null;
-
-
-		/*
-		 * -------------------------------------------------
-		 * THUMBNAIL IMAGE
-		 * -------------------------------------------------
-		 */
-
-		const thumbImg =
-			document.createElement("img");
-
-		thumbImg.className =
-			"thumb thumbnail-image";
-
-		/*thumbImg.style.visibility =
-			"hidden";*/
-
-
-		/*
-		 * -------------------------------------------------
-		 * MEDIUM IMAGE
-		 * -------------------------------------------------
-		 */
-
-		const mediumImg =
-			document.createElement("img");
-
-		mediumImg.className =
-			"thumb medium-image";
-
-		mediumImg.style.visibility =
-			"hidden";
-
-		mediumImg.style.opacity =
-			"0";
-
-
-		/*
-		 * Medium sits above the thumbnail.
-		 */
-
-		el.appendChild(
-			thumbImg);
-
-		el.appendChild(
-			mediumImg);
-
-		gallery.appendChild(
-			el);
-
-		thumbnailItems.push({
-
-			index:
-				index,
-
-			slotIndex:
-				gallery.children.length - 1,
-
-			src:
-				img.thumb.url,
-
-			tags:
-				img.tags || [],
-
-			mediumSrc:
-				img.medium?.url ||
-				img.image?.url ||
-				"",
-
-			fullSrc:
-				img.image?.url ||
-				"",
-
-			slot:
-				el,
-
-			img:
-				thumbImg,
-
-			mediumImg:
-				mediumImg,
-
-			loaded:
-				false,
-
-			loading:
-				false,
-
-			assigned:
-				false,
-
-			mediumLoaded:
-				false,
-
-			mediumLoading:
-				false,
-
-			mediumImage:
-				null
-
-		});
-		const mediumSrc =
-			img.medium?.url ||
-			img.image?.url ||
-			"";
-
-		mediumItems.push({
-
-			index:
-				index,
-
-			src:
-				mediumSrc,
-
-			mediumLoaded:
-				false,
-
-			mediumLoading:
-				false,
-
-			mediumImage:
-				mediumImg,
-
-			mediumBlobURL:
-				null
-
-		});
-
-	});
-
-	if (album.tags?.length) {
-
-		buildTagList(
-			album.tags);
-
-	} else {
-
-		buildAlbumTags(
-			album);
-
-	}
-
-	requestAnimationFrame(() => {
-
-		requestAnimationFrame(() => {
-
-			loadTagBarState();
-
-			applyGalleryLayout(
-				false);
-
-			startThumbnailLoading();
-
-		});
-
-	});
-
-	document.documentElement.classList.remove(
-		"pageLoading");
-
+async function loadAlbum(album, pushHistory = true) {
+    selectedTags.clear();
+    document.getElementById("tagBar").style.display = "";
+    document.getElementById("tagList").innerHTML = "";
+    document.getElementById("pageName").textContent = album.name;
+    document.title = album.name;
+    currentAlbum = album;
+
+    if (pushHistory) {
+        history.pushState(null, "", "?$" + encodeURIComponent(album.id));
+        showAlbumButtons(true);
+    }
+
+    if (album.url?.startsWith("tg://chat/")) {
+        try {
+            await loadTelegramAlbum(album);
+        } catch (error) {
+            alert("Failed to load Telegram album:\n\n" + (error?.message || String(error)));
+            return;
+        }
+    }
+
+    const gallery = document.getElementById("gallery");
+    gallery.innerHTML = "";
+    stopThumbnailLoading();
+    thumbnailItems = [];
+    thumbnailQueue = [];
+    thumbnailLoading = false;
+    stopMediumLoading();
+    mediumItems = [];
+    mediumQueue = [];
+    mediumLoading = false;
+
+    album.images.forEach((image, index) => createAlbumImageItems(album, image, index, gallery));
+
+    if (album.tags?.length)
+        buildTagList(album.tags);
+    else
+        buildAlbumTags(album);
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        loadTagBarState();
+        applyGalleryLayout(false);
+        startThumbnailLoading();
+    }));
+
+    document.documentElement.classList.remove("pageLoading");
+    showAddImageButton();
 }
 
-function openTemporaryAlbumFromURL(
-    url) {
+function createAlbumImageItems(album, image, index, gallery) {
+    const source = image.source || "url";
+    const urls = getImageURLs(image);
+    if (!urls.thumb && source === "url")
+        return;
+
+    const slot = document.createElement("div");
+    slot.className = "thumbnail-slot";
+    slot.dataset.index = index;
+    slot.dataset.thumbnailIndex = index;
+    slot.dataset.src = urls.thumb || "";
+    slot.dataset.loaded = "false";
+    slot.dataset.loading = "false";
+    slot.style.visibility = "hidden";
+    slot._thumbnailItem = null;
+
+    const thumbImg = document.createElement("img");
+    thumbImg.className = "thumb thumbnail-image";
+
+    const mediumImg = document.createElement("img");
+    mediumImg.className = "thumb medium-image";
+    mediumImg.style.visibility = "hidden";
+    mediumImg.style.opacity = "0";
+
+    slot.append(thumbImg, mediumImg);
+    gallery.appendChild(slot);
+
+    if (album.edited && image.added) {
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "image-remove";
+        removeBtn.textContent = "×";
+        removeBtn.title = "Remove added image";
+        removeBtn.onclick = e => {
+            e.stopPropagation();
+            if (!confirm("Remove this added image?"))
+                return;
+            album.images.splice(index, 1);
+            album.edited = true;
+            showEditedAlbumSaveButton();
+            loadAlbum(album, false);
+        };
+        slot.appendChild(removeBtn);
+    }
+
+    const thumbnailItem = {
+        index,
+        slotIndex: gallery.children.length - 1,
+        image,
+        src: urls.thumb,
+        mediumSrc: urls.medium,
+        fullSrc: urls.full,
+        source,
+        telegramFileID: image.telegramFileID || null,
+        telegramThumbnailFileID: image.telegramThumbnailFileID || null,
+        mimeType: image.mimeType || "",
+        fileName: image.fileName || "",
+        messageID: image.messageID || null,
+        slot,
+        img: thumbImg,
+        mediumImg,
+        loaded: false,
+        loading: false,
+        assigned: false,
+        mediumLoaded: false,
+        mediumLoading: false,
+        mediumFailed: false,
+        mediumImage: null
+    };
+    slot._thumbnailItem = thumbnailItem;
+    slot.onclick = () => {
+        if (!slot._thumbnailItem)
+            return;
+        const current = slot._thumbnailItem;
+        currentImageIndex = current.index;
+        openModal(current.src, current.mediumSrc, current.fullSrc, slot);
+    };
+    thumbnailItems.push(thumbnailItem);
+
+    mediumItems.push({
+        index,
+        image,
+        src: urls.medium,
+        source,
+        telegramFileID: image.telegramFileID || null,
+        mimeType: image.mimeType || "",
+        fileName: image.fileName || "",
+        messageID: image.messageID || null,
+        mediumLoaded: false,
+        mediumLoading: false,
+        mediumFailed: false,
+        mediumImage: mediumImg,
+        mediumBlobURL: null
+    });
+}
+
+function getImageURLs(image) {
+    const thumb = image.thumb?.url || image.image?.url || image.medium?.url || "";
+    const medium = image.medium?.url || image.image?.url || thumb;
+    const full = image.image?.url || image.medium?.url || thumb;
+    return { thumb, medium, full };
+}
+
+const imageAssetCache = new WeakMap();
+const imageResponseCacheName = "gallery-image-assets-v1";
+
+async function blobURLFromResponse(response, assets, key) {
+    if (!response || !response.ok)
+        return null;
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    assets[key] = url;
+    return url;
+}
+
+async function resolveCachedURL(url, image, resolution, isActive) {
+    if (!url)
+        return null;
+
+    let assets = imageAssetCache.get(image);
+    if (!assets) {
+        assets = {};
+        imageAssetCache.set(image, assets);
+    }
+    if (assets[resolution])
+        return assets[resolution];
+
+    const cacheKey = `https://gallery-image.invalid/url/${resolution}/${encodeURIComponent(url)}`;
+    let cache = null;
+
+    try {
+        if (window.caches) {
+            cache = await caches.open(imageResponseCacheName);
+            const cached = await cache.match(cacheKey);
+            if (cached)
+                return blobURLFromResponse(cached, assets, resolution);
+        }
+    } catch (error) {
+        console.debug("[IMAGE CACHE] Cache lookup failed", {
+            resolution,
+            url,
+            error
+        });
+    }
+
+    let response;
+    try {
+        response = await fetch(url, {cache: "force-cache"});
+    } catch (error) {
+        console.debug("[IMAGE FETCH] Fetch failed", {
+            resolution,
+            url,
+            errorName: error?.name,
+            errorMessage: error?.message
+        });
+        return null;
+    }
+
+    if (isActive && !isActive())
+        return null;
+
+    if (!response.ok) {
+        console.debug("[IMAGE FETCH] Server returned an error", {
+            resolution,
+            url,
+            status: response.status,
+            statusText: response.statusText
+        });
+        return null;
+    }
+
+    try {
+        if (cache)
+            await cache.put(cacheKey, response.clone());
+    } catch (error) {
+        console.debug("[IMAGE CACHE] Cache store failed", {
+            resolution,
+            url,
+            error
+        });
+    }
+
+    try {
+        return await blobURLFromResponse(response, assets, resolution);
+    } catch (error) {
+        console.debug("[IMAGE FETCH] Response-to-Blob failed", {
+            resolution,
+            url,
+            errorName: error?.name,
+            errorMessage: error?.message
+        });
+        return null;
+    }
+}
+
+const imageSources = {
+    url: {
+        resolve: async (image, resolution, isActive) =>
+            resolveCachedURL(getImageURLs(image)[resolution], image, resolution, isActive)
+    },
+    telegram: {
+        resolve: async (image, resolution, isActive) => {
+            const key = resolution === "thumb" ? "thumb" : "full";
+            let assets = imageAssetCache.get(image);
+            if (!assets) {
+                assets = {};
+                imageAssetCache.set(image, assets);
+            }
+            if (assets[key])
+                return assets[key];
+
+            const fileID = resolution === "thumb"
+                ? image.telegramThumbnailFileID
+                : image.telegramFileID;
+            if (!fileID || !window.telegramClient)
+                return null;
+
+            const cacheKey = `https://gallery-image.invalid/telegram/${encodeURIComponent(fileID)}/${key}`;
+            try {
+                if (window.caches) {
+                    const cache = await caches.open(imageResponseCacheName);
+                    const cached = await cache.match(cacheKey);
+                    if (cached)
+                        return blobURLFromResponse(cached, assets, key);
+                }
+            } catch {}
+
+            const chunks = [];
+            for await (const chunk of window.telegramClient.download(fileID, {
+                chunkSize: key === "thumb" ? 64 * 1024 : 256 * 1024
+            })) {
+                if (isActive && !isActive())
+                    return null;
+                chunks.push(chunk);
+            }
+            if (isActive && !isActive())
+                return null;
+
+            const blob = new Blob(chunks, {type: image.mimeType || "image/jpeg"});
+            const url = URL.createObjectURL(blob);
+            assets[key] = url;
+
+            try {
+                if (window.caches) {
+                    const cache = await caches.open(imageResponseCacheName);
+                    await cache.put(cacheKey, new Response(blob, {
+                        headers: {"Content-Type": blob.type || "image/jpeg"}
+                    }));
+                }
+            } catch {}
+
+            return url;
+        }
+    }
+};
+
+async function resolveImageAsset(item, resolution, isActive) {
+    if (!item?.image)
+        return null;
+    const source = imageSources[item.source] || imageSources.url;
+    return source.resolve(item.image, resolution, isActive);
+}
+
+function openTemporaryAlbumFromURL(url) {
 
     if (!url)
         return;
@@ -1728,29 +2097,17 @@ function openTemporaryAlbumFromURL(
 
     if (!query) {
 
-        alert(
-            "No album query was found in that URL."
-        );
+        alert("No album query was found in that URL.");
 
         return;
 
     }
 
     const album =
-        createQueryAlbum(
-            query
-        );
-
-    /*
-     * -------------------------------------------------
-     * GENERATE TEMPORARY ID
-     * -------------------------------------------------
-     */
+        createQueryAlbum(query);
 
     const id =
-        generateAlbumID(
-            album.name
-        );
+        generateAlbumID(album.name);
 
     album.id =
         id;
@@ -1758,222 +2115,225 @@ function openTemporaryAlbumFromURL(
     album.temporary =
         true;
 
-    /*
-     * -------------------------------------------------
-     * STORE CURRENT TEMPORARY ALBUM ID
-     * -------------------------------------------------
-     *
-     * This tells the navigation code that this is
-     * the temporary album currently being viewed.
-     */
-
     currentTemporaryAlbumID =
         id;
 
-    /*
-     * -------------------------------------------------
-     * STORE TEMPORARY ALBUM
-     * -------------------------------------------------
-     */
-
-    saveTemporaryAlbum(
-        album
-    );
-
-    /*
-     * -------------------------------------------------
-     * LOAD IT
-     * -------------------------------------------------
-     */
+    saveTemporaryAlbum(album);
 
     history.pushState(
         null,
         "",
         "?=" +
-        encodeURIComponent(
-            id
-        )
+        encodeURIComponent(id)
     );
 
-    loadAlbumFromURL(
-        album
-    );
+    loadAlbum(album, false);
 
-    showAlbumButtons(
-        true
-    );
+    showAlbumButtons(true);
 
 }
 
 let thumbnailItems = [];
-let thumbnailQueue =[];
+let thumbnailQueue = [];
 let thumbnailLoading = false;
 let thumbnailObserver = null;
 let thumbnailScrollTimer = null;
-let thumbnailCheckScheduled = false;
 const THUMBNAIL_SETTLE_DELAY = 1000;
+const IMAGE_RETRY_DELAY = 3000;
 let thumbnailLoadSession = 0;
 let thumbnailPriorityMode = false;
 let thumbnailPriorityPaused = false;
+let imageRetryTimer = null;
+let lastImageFailureTime = 0;
+let imageRetryPending = false;
+let modalRetry = null;
+
+function noteImageFailure() {
+    lastImageFailureTime = Date.now();
+    imageRetryPending = true;
+    if (imageRetryTimer) {
+        clearTimeout(imageRetryTimer);
+        imageRetryTimer = null;
+    }
+    scheduleImageRetry();
+}
+
+function scheduleImageRetry() {
+    if (imageRetryTimer)
+        return;
+
+    const remaining = Math.max(0, IMAGE_RETRY_DELAY - (Date.now() - lastImageFailureTime));
+    imageRetryTimer = setTimeout(() => {
+        imageRetryTimer = null;
+        if (!imageRetryPending)
+            return;
+        imageRetryPending = false;
+        retryFailedImages();
+    }, remaining);
+}
+
+function retryFailedImages() {
+    if (modalRetry && isModalLoadActive(modalRetry.loadID)) {
+        const retry = modalRetry;
+        modalRetry = null;
+        if (retry.name === "open") {
+            openModal(retry.thumbSrc, retry.mediumSrc, retry.fullSrc, retry.slot);
+            return;
+        }
+        load(retry.url, retry.name, retry.loadID);
+        return;
+    }
+
+    if (thumbnailPriorityPaused)
+        return;
+
+    if (thumbnailItems.some(item => item && !item.loaded && item.thumbnailFailed)) {
+        thumbnailItems.forEach(item => {
+            if (item && item.thumbnailFailed)
+                item.thumbnailFailed = false;
+        });
+        rebuildThumbnailQueue(false, true);
+        processThumbnailQueue(thumbnailLoadSession);
+        return;
+    }
+
+    if (mediumItems.some(item => item && !item.mediumLoaded && item.mediumFailed)) {
+        mediumItems.forEach(item => {
+            if (item && item.mediumFailed)
+                item.mediumFailed = false;
+        });
+        rebuildMediumQueue(false, true);
+        processMediumQueue(mediumLoadSession);
+    }
+}
 
 function pauseThumbnailLoading() {
-
-    thumbnailPriorityPaused =
-        true;
-
-    clearTimeout(
-        thumbnailScrollTimer
-    );
-
-    thumbnailScrollTimer =
-        null;
+    thumbnailPriorityPaused = true;
+    clearTimeout(thumbnailScrollTimer);
+    thumbnailScrollTimer = null;
 }
 
 function resumeThumbnailLoading() {
-
-	thumbnailPriorityPaused =
-		false;
-
-	/*
-	 * Give currently visible thumbnails priority
-	 * immediately when the modal finishes.
-	 */
-
-	prioritizeVisibleThumbnails();
-
-	/*
-	 * -------------------------------------------------
-	 * RESUME THUMBNAILS ONLY
-	 * -------------------------------------------------
-	 *
-	 * IMPORTANT:
-	 *
-	 * Do NOT start the Medium queue here.
-	 *
-	 * This function is also called when a modal
-	 * finishes loading. The Medium background queue
-	 * must never be started merely because a modal
-	 * finished.
-	 */
-
-	if (
-		!thumbnailLoading &&
-		thumbnailQueue.length
-	) {
-
-		processThumbnailQueue(
-			thumbnailLoadSession
-		);
-
-	}
-
+    thumbnailPriorityPaused = false;
+    prioritizeVisibleThumbnails();
+    if (!thumbnailLoading)
+        processThumbnailQueue(thumbnailLoadSession);
 }
 
 function stopThumbnailLoading() {
-
-	thumbnailLoadSession++;
-
-	clearTimeout(
-		thumbnailScrollTimer);
-
-	thumbnailScrollTimer =
-		null;
-
-	if (thumbnailObserver) {
-
-		thumbnailObserver.disconnect();
-
-		thumbnailObserver =
-			null;
-
-	}
-
-	thumbnailCheckScheduled =
-		false;
-
-	thumbnailPriorityMode =
-		false;
-
+    thumbnailLoadSession++;
+    clearTimeout(thumbnailScrollTimer);
+    thumbnailScrollTimer = null;
+    if (thumbnailObserver) {
+        thumbnailObserver.disconnect();
+        thumbnailObserver = null;
+    }
+    thumbnailPriorityMode = false;
 }
 
 function getThumbnailSlots() {
-
-	const gallery =
-		document.getElementById(
-			"gallery");
-
-	if (!gallery)
-		return [];
-
-	return Array.from(
-		gallery.querySelectorAll(
-			".thumbnail-slot"
-		));
-
+    const gallery = document.getElementById("gallery");
+    if (!gallery)
+        return [];
+    return Array.from(gallery.querySelectorAll(".thumbnail-slot"));
 }
 
 function getVisibleThumbnailSlots() {
-
-	return getThumbnailSlots()
-		.filter(
-			slot => {
-
-				const rect =
-					slot.getBoundingClientRect();
-
-				return (
-					rect.bottom > 0 &&
-					rect.top < window.innerHeight &&
-					rect.right > 0 &&
-					rect.left < window.innerWidth
-				);
-
-			}
-		)
-		.sort(
-			(a, b) => {
-
-				const aRect =
-					a.getBoundingClientRect();
-
-				const bRect =
-					b.getBoundingClientRect();
-
-				if (
-					Math.abs(
-						aRect.top -
-						bRect.top
-					) > 1
-				) {
-
-					return (
-						aRect.top -
-						bRect.top
-					);
-
-				}
-
-				return (
-					aRect.left -
-					bRect.left
-				);
-
-			}
-		);
-
+    return getThumbnailSlots()
+        .map((slot, position) => ({slot, position, rect: slot.getBoundingClientRect()}))
+        .filter(item =>
+            item.rect.bottom > 0 &&
+            item.rect.top < window.innerHeight &&
+            item.rect.right > 0 &&
+            item.rect.left < window.innerWidth
+        )
+        .sort((a, b) => {
+            if (Math.abs(a.rect.top - b.rect.top) > 1)
+                return a.rect.top - b.rect.top;
+            return a.rect.left - b.rect.left;
+        })
+        .map(item => item.slot);
 }
 
-function isThumbnailLoaded(item) {
-
-	return (
-		item &&
-		item.loaded === true
-	);
-
+function getNextAvailableVisibleSlot() {
+    for (const slot of getVisibleThumbnailSlots()) {
+        if (slot.dataset.loaded !== "true" && slot.dataset.loading !== "true")
+            return slot;
+    }
+    return null;
 }
 
-function assignThumbnailToSlot(
-    item,
+function rebuildThumbnailQueue(prioritizeVisible = false, restoreFailed = false) {
+    const eligible = thumbnailItems.filter(item =>
+        item &&
+        !item.loaded &&
+        !item.loading
+    );
+
+    if (!prioritizeVisible) {
+        const normal = eligible.filter(item => !item.thumbnailFailed)
+            .sort((a, b) => a.index - b.index);
+        const failed = eligible.filter(item => item.thumbnailFailed)
+            .sort((a, b) => a.index - b.index);
+        thumbnailQueue = normal.concat(failed);
+        return;
+    }
+
+    const visible = new Set(getVisibleThumbnailSlots()
+        .map(slot => Number(slot.dataset.index)));
+
+    const ordered = eligible.sort((a, b) => a.index - b.index);
+    const visibleItems = ordered.filter(item => visible.has(item.index));
+    const remaining = ordered.filter(item => !visible.has(item.index));
+
+    if (restoreFailed) {
+        eligible.forEach(item => {
+            if (item.thumbnailFailed)
+                item.thumbnailFailed = false;
+        });
+        thumbnailQueue = visibleItems.concat(remaining);
+    } else {
+        const normal = visibleItems.concat(remaining).filter(item => !item.thumbnailFailed);
+        const failed = visibleItems.concat(remaining).filter(item => item.thumbnailFailed);
+        thumbnailQueue = normal.concat(failed);
+    }
+}
+
+async function forceLoadThumbnail(item) {
+    if (!item || item.loaded)
+        return item?.src || null;
+
+    const url = await resolveImageAsset(item, "thumb", () => isModalLoadActive(modalLoadID));
+    if (!url || !isModalLoadActive(modalLoadID))
+        return null;
+
+    const slot = item.slot;
+    const img = slot?.querySelector(".thumbnail-image") || item.img;
+    if (!img)
+        return null;
+
+    img.src = url;
+    item.src = url;
+    item.loaded = true;
+    item.loading = false;
+    item.assigned = true;
+    item.thumbnailFailed = false;
+
+    if (slot) {
+        slot._thumbnailItem = item;
+        slot.dataset.index = item.index;
+        slot.dataset.src = url;
+        slot.dataset.loaded = "true";
+        slot.dataset.loading = "false";
+        slot.style.visibility = "visible";
+        img.style.visibility = "visible";
+    }
+
+    thumbnailQueue = thumbnailQueue.filter(queueItem => queueItem !== item);
+    return url;
+}
+
+function assignThumbnailToSlot(item,
     slot) {
 
     if (
@@ -2011,17 +2371,15 @@ function assignThumbnailToSlot(
 
     }
 
-    /*
-     * -------------------------------------------------
-     * RESET SLOT
-     * -------------------------------------------------
-     */
-
     slot.style.visibility =
         "hidden";
 
     slot._thumbnailItem =
         item;
+
+    item.slot = slot;
+    item.img = thumbnailImg;
+    item.mediumImg = mediumImg;
 
     slot.dataset.index =
         item.index;
@@ -2035,14 +2393,6 @@ function assignThumbnailToSlot(
     slot.dataset.loading =
         "false";
 
-    /*
-     * Reset the Medium layer.
-     *
-     * This is important because the slot may have
-     * previously represented a completely different
-     * album image.
-     */
-
     mediumImg.style.visibility =
         "hidden";
 
@@ -2052,14 +2402,8 @@ function assignThumbnailToSlot(
     mediumImg.removeAttribute(
         "src");
 
-    /*
-     * -------------------------------------------------
-     * ALT / CLICK
-     * -------------------------------------------------
-     */
-
     slot.alt =
-        item.tags.join(",");
+        (item.tags || []).join(",");
 
     slot.onclick =
         () => {
@@ -2087,12 +2431,6 @@ function assignThumbnailToSlot(
 
     };
 
-    /*
-     * -------------------------------------------------
-     * THUMBNAIL
-     * -------------------------------------------------
-     */
-
     if (
         item.loaded
     ) {
@@ -2113,16 +2451,6 @@ function assignThumbnailToSlot(
             "visible";
 
     }
-
-    /*
-     * -------------------------------------------------
-     * MEDIUM
-     * -------------------------------------------------
-     *
-     * If this image's Medium was already loaded,
-     * immediately put the existing decoded image
-     * into this slot.
-     */
 
     if (
         item.mediumLoaded &&
@@ -2177,2126 +2505,450 @@ function getNextAvailableVisibleSlot() {
 
 }
 
-function loadThumbnail(
-	item,
-	session) {
-
-	return new Promise(
-		resolve => {
-
-			if (
-				!item ||
-				item.loaded ||
-				item.loading
-			) {
-
-				resolve();
-
-				return;
-
-			}
-
-			if (
-				session !==
-				thumbnailLoadSession
-			) {
-
-				resolve();
-
-				return;
-
-			}
-
-			/*
-			 * -------------------------------------------------
-			 * CHOOSE SLOT
-			 * -------------------------------------------------
-			 */
-
-			let targetSlot =
-				null;
-
-			if (
-				thumbnailPriorityMode
-			) {
-
-				targetSlot =
-					getNextAvailableVisibleSlot();
-
-			}
-
-			if (!targetSlot) {
-
-				const slots =
-					getThumbnailSlots();
-
-				targetSlot =
-					slots.find(
-						slot => {
-
-							if (
-								slot.dataset.loading ===
-								"true"
-							) {
-
-								return false;
-
-							}
-
-							if (
-								slot.dataset.loaded ===
-								"true"
-							) {
-
-								return false;
-
-							}
-
-							return true;
-
-						}
-					);
-
-			}
-
-			if (!targetSlot) {
-
-				resolve();
-
-				return;
-
-			}
-
-			/*
-			 * -------------------------------------------------
-			 * GET THE ACTUAL THUMBNAIL IMAGE
-			 * -------------------------------------------------
-			 */
-
-			const img =
-				targetSlot.querySelector(
-					".thumbnail-image"
-				);
-
-			if (!img) {
-
-				resolve();
-
-				return;
-
-			}
-
-			item.loading =
-				true;
-
-			assignThumbnailToSlot(
-				item,
-				targetSlot
-			);
-
-			const finish =
-				success => {
-
-				img.removeEventListener(
-					"load",
-					onLoad
-				);
-
-				img.removeEventListener(
-					"error",
-					onError
-				);
-
-				item.loading =
-					false;
-
-				/*
-				 * IMPORTANT:
-				 *
-				 * Loading/loaded state belongs
-				 * to the SLOT, not the image.
-				 */
-
-				targetSlot.dataset.loading =
-					"false";
-
-				if (
-					session !==
-					thumbnailLoadSession
-				) {
-
-					resolve();
-
-					return;
-
-				}
-
-				if (success) {
-
-					item.loaded =
-						true;
-
-					item.assigned =
-						true;
-
-					targetSlot.dataset.loaded =
-						"true";
-
-					targetSlot.style.visibility =
-						"visible";
-
-					/*
-					 * The thumbnail image itself
-					 * is already visible here.
-					 */
-
-					img.style.visibility =
-						"visible";
-
-				}
-				else {
-
-					console.warn(
-						"[THUMBNAIL] Failed:",
-						item.src
-					);
-
-					targetSlot.dataset.loaded =
-						"false";
-
-				}
-
-				resolve();
-
-			};
-
-			const onLoad =
-				() => {
-
-				finish(
-					true
-				);
-
-			};
-
-			const onError =
-				() => {
-
-				finish(
-					false
-				);
-
-			};
-
-			img.addEventListener(
-				"load",
-				onLoad
-			);
-
-			img.addEventListener(
-				"error",
-				onError
-			);
-
-			/*
-			 * IMPORTANT:
-			 *
-			 * Again, loading state belongs
-			 * to the SLOT.
-			 */
-
-			targetSlot.dataset.loading =
-				"true";
-
-			img.src =
-				item.src;
-
-		}
-	);
-
-}
-
-async function processThumbnailQueue(
-    session) {
-		console.log("start");
-		//debugger;
-
-    if (
-        thumbnailPriorityPaused
-    ) {
-
-        return;
-
-    }
-
-    if (
-        thumbnailLoading
-    ) {
-
-        return;
-
-    }
-
-    thumbnailLoading =
-        true;
-
-    while (
-        thumbnailQueue.length &&
-        session ===
-            thumbnailLoadSession &&
-        !thumbnailPriorityPaused
-    ) {
-
-        /*
-         * -------------------------------------------------
-         * PRIORITY MODE
-         * -------------------------------------------------
-         */
-
-        if (
-            thumbnailPriorityMode
-        ) {
-
-            const visibleSlots =
-                getVisibleThumbnailSlots();
-
-            if (
-                !visibleSlots.length
-            ) {
-
-                break;
-
+function loadThumbnail(item, session) {
+    return new Promise(resolve => {
+        if (!item || item.loaded || item.loading || session !== thumbnailLoadSession) {
+            resolve();
+            return;
+        }
+
+        let targetSlot = thumbnailPriorityMode ? getNextAvailableVisibleSlot() : null;
+        if (!targetSlot)
+            targetSlot = getThumbnailSlots().find(slot =>
+                slot.dataset.loading !== "true" && slot.dataset.loaded !== "true"
+            );
+        if (!targetSlot) {
+            resolve();
+            return;
+        }
+
+        const img = targetSlot.querySelector(".thumbnail-image");
+        if (!img) {
+            resolve();
+            return;
+        }
+
+        item.loading = true;
+        item.thumbnailFailed = false;
+        assignThumbnailToSlot(item, targetSlot);
+        targetSlot.dataset.loading = "true";
+
+        const finish = success => {
+            img.onload = null;
+            img.onerror = null;
+            item.loading = false;
+            targetSlot.dataset.loading = "false";
+
+            if (session !== thumbnailLoadSession) {
+                resolve();
+                return;
             }
 
-            prioritizeVisibleQueue();
+            if (success) {
+                item.loaded = true;
+                item.assigned = true;
+                item.thumbnailFailed = false;
+                targetSlot.dataset.loaded = "true";
+                targetSlot.style.visibility = "visible";
+                img.style.visibility = "visible";
+            } else {
+                item.loaded = false;
+                item.assigned = false;
+                item.thumbnailFailed = true;
+                targetSlot.dataset.loaded = "false";
+                noteImageFailure();
+                console.debug("[THUMBNAIL] Failed; deferred for retry", {
+                    index: item.index,
+                    source: item.source,
+                    url: item.src || item.mediumSrc || item.fullSrc || null
+                });
+            }
+            resolve();
+        };
 
+        img.onload = () => finish(true);
+        img.onerror = () => finish(false);
+        resolveImageAsset(item, "thumb", () => session === thumbnailLoadSession)
+            .then(url => {
+                if (!url || session !== thumbnailLoadSession) {
+                    finish(false);
+                    return;
+                }
+                item.src = url;
+                targetSlot.dataset.src = url;
+                img.src = url;
+            })
+            .catch(error => {
+                console.debug("[THUMBNAIL] Asset resolution failed", {
+                    index: item.index,
+                    source: item.source,
+                    errorName: error?.name,
+                    errorMessage: error?.message
+                });
+                finish(false);
+            });
+    });
+}
+
+async function processThumbnailQueue(session) {
+    if (thumbnailLoading || thumbnailPriorityPaused || session !== thumbnailLoadSession)
+        return;
+
+    thumbnailLoading = true;
+
+    while (thumbnailQueue.length && session === thumbnailLoadSession && !thumbnailPriorityPaused) {
+        if (thumbnailPriorityMode) {
+            const visibleSlots = getVisibleThumbnailSlots();
+            if (!visibleSlots.length)
+                break;
+            prioritizeVisibleQueue();
         }
 
-        /*
-         * -------------------------------------------------
-         * GET NEXT ITEM
-         * -------------------------------------------------
-         */
-
-        const item =
-            thumbnailQueue.shift();
-
-        if (
-            !item ||
-            item.loaded ||
-            item.loading
-        ) {
-
+        const item = thumbnailQueue.shift();
+        if (!item || item.loaded || item.loading)
             continue;
 
+        if (item.thumbnailFailed) {
+            thumbnailQueue.push(item);
+            if (!thumbnailQueue.some(entry => entry && !entry.loaded && !entry.loading && !entry.thumbnailFailed))
+                break;
+            continue;
         }
 
-        /*
-         * -------------------------------------------------
-         * LOAD
-         * -------------------------------------------------
-         */
-
-        await loadThumbnail(
-            item,
-            session
-        );
-
+        await loadThumbnail(item, session);
     }
 
-    thumbnailLoading =
-        false;
+    thumbnailLoading = false;
 
-    /*
-     * -------------------------------------------------
-     * DO NOT START MEDIUM WHILE THUMBNAILS ARE
-     * STILL ACTIVE OR PRIORITY WORK IS ACTIVE
-     * -------------------------------------------------
-     */
-
-    if (
-        thumbnailPriorityPaused ||
-        thumbnailPriorityMode ||
-        session !== thumbnailLoadSession
-    ) {
-
+    if (thumbnailPriorityPaused || thumbnailPriorityMode || session !== thumbnailLoadSession)
         return;
 
-    }
+    const remainingNormal = thumbnailItems.some(item =>
+        item && !item.loaded && !item.loading && !item.thumbnailFailed
+    );
 
-    /*
-     * -------------------------------------------------
-     * CHECK WHETHER ANY THUMBNAILS ARE STILL LOADING
-     * -------------------------------------------------
-     */
-
-    const thumbnailStillLoading =
-        thumbnailItems.some(
-            item =>
-                item &&
-                item.loading
-        );
-
-    if (
-        thumbnailStillLoading
-    ) {
-
+    if (remainingNormal) {
+        rebuildThumbnailQueue(false, true);
+        processThumbnailQueue(session);
         return;
-
     }
 
-    /*
-     * -------------------------------------------------
-     * CHECK WHETHER ANY THUMBNAILS REMAIN
-     * -------------------------------------------------
-     */
-
-    const thumbnailsRemaining =
-        thumbnailItems.some(
-            item =>
-                item &&
-                !item.loaded
-        );
-
-    if (
-        thumbnailsRemaining
-    ) {
-
-        /*
-         * The current queue may have been exhausted
-         * because visible-priority work rearranged it.
-         *
-         * Rebuild it in absolute album order.
-         */
-
-        thumbnailQueue =
-            thumbnailItems
-                .filter(
-                    item =>
-                        item &&
-                        !item.loaded &&
-                        !item.loading
-                )
-                .sort(
-                    (a, b) =>
-                        a.index -
-                        b.index
-                );
-
-        /*
-         * Continue thumbnails.
-         */
-
-        processThumbnailQueue(
-            session
-        );
-
-        return;
-
+    const failed = thumbnailItems.some(item => item && !item.loaded && item.thumbnailFailed);
+    if (failed) {
+        imageRetryPending = true;
+        scheduleImageRetry();
     }
 
-    /*
-     * -------------------------------------------------
-     * ALL THUMBNAILS ARE ACTUALLY FINISHED
-     * -------------------------------------------------
-     *
-     * Only NOW may Medium begin.
-     */
-
-    startMediumLoading();
-
+    if (!remainingNormal)
+        startMediumLoading();
 }
 
 function prioritizeVisibleQueue() {
-
-	const visibleSlots =
-		getVisibleThumbnailSlots();
-
-	if (
-		!visibleSlots.length
-	) {
-
-		return;
-
-	}
-
-	const priority =
-		[];
-
-	const seen =
-		new Set();
-
-	/*
-	 * Determine which album images belong to
-	 * the currently visible positions.
-	 */
-
-	visibleSlots.forEach(
-		slot => {
-
-			const index =
-				Number(
-					slot.dataset.index
-				);
-
-			const item =
-				thumbnailItems.find(
-					entry =>
-						entry.index ===
-						index
-				);
-
-			if (
-				!item ||
-				item.loaded ||
-				item.loading
-			) {
-
-				return;
-
-			}
-
-			if (
-				seen.has(item)
-			) {
-
-				return;
-
-			}
-
-			seen.add(item);
-
-			priority.push(
-				item);
-
-		}
-	);
-
-	if (
-		!priority.length
-	) {
-
-		return;
-
-	}
-
-	priority.sort(
-		(a, b) =>
-			a.index -
-			b.index
-	);
-
-	const prioritySet =
-		new Set(
-			priority
-		);
-
-	thumbnailQueue =
-		priority.concat(
-			thumbnailQueue.filter(
-				item =>
-					!prioritySet.has(
-						item
-					)
-			)
-		);
-
+    rebuildThumbnailQueue(true, true);
 }
 
 function prioritizeVisibleThumbnails() {
+    if (thumbnailPriorityPaused)
+        return;
+    thumbnailPriorityMode = true;
+    rebuildThumbnailQueue(true, true);
+    processThumbnailQueue(thumbnailLoadSession);
 
-    /*
-     * -------------------------------------------------
-     * ENTER PRIORITY MODE
-     * -------------------------------------------------
-     */
-
-    thumbnailPriorityMode =
-        true;
-
-    /*
-     * Move currently visible images to the
-     * front of the queue.
-     */
-
-    prioritizeVisibleQueue();
-
-    /*
-     * Start/resume the queue.
-     */
-
-    processThumbnailQueue(
-        thumbnailLoadSession
-    );
-
-    /*
-     * -------------------------------------------------
-     * CHECK WHETHER PRIORITY WORK IS FINISHED
-     * -------------------------------------------------
-     */
-
-    const finishPriorityCheck =
-        () => {
-
-        if (
-            !thumbnailPriorityMode
-        ) {
-
+    const finishPriorityCheck = () => {
+        if (!thumbnailPriorityMode)
             return;
 
-        }
+        const visibleSlots = getVisibleThumbnailSlots();
+        const pendingVisible = visibleSlots.some(slot => {
+            const item = thumbnailItems.find(entry => entry.index === Number(slot.dataset.index));
+            return item && !item.loaded;
+        });
 
-        const visibleSlots =
-            getVisibleThumbnailSlots();
-
-        let pendingVisible =
-            false;
-
-        visibleSlots.forEach(
-            slot => {
-
-                const index =
-                    Number(
-                        slot.dataset.index
-                    );
-
-                const item =
-                    thumbnailItems.find(
-                        entry =>
-                            entry.index ===
-                            index
-                    );
-
-                if (
-                    item &&
-                    !item.loaded
-                ) {
-
-                    pendingVisible =
-                        true;
-
-                }
-
-            }
-        );
-
-        if (
-            pendingVisible
-        ) {
-
-            /*
-             * Visible images are still being
-             * processed.
-             *
-             * Check again after they have had
-             * time to finish.
-             */
-
-            setTimeout(
-                finishPriorityCheck,
-                50
-            );
-
+        if (pendingVisible) {
+            setTimeout(finishPriorityCheck, 50);
             return;
-
         }
 
-        /*
-         * -------------------------------------------------
-         * VISIBLE IMAGES ARE DONE
-         * -------------------------------------------------
-         *
-         * Leave priority mode.
-         *
-         * IMPORTANT:
-         *
-         * Do NOT continue using the existing queue
-         * position.
-         *
-         * Rebuild the normal queue from the actual
-         * thumbnail item state so the next image is
-         * always the lowest-index image that has not
-         * loaded yet.
-         */
+        thumbnailPriorityMode = false;
+        rebuildThumbnailQueue(false, true);
+        processThumbnailQueue(thumbnailLoadSession);
+        if (mediumItems.length)
+            prioritizeVisibleMediums();
+    };
 
-        thumbnailPriorityMode =
-            false;
-
-        thumbnailQueue =
-            thumbnailItems
-                .filter(
-                    item =>
-                        item &&
-                        !item.loaded &&
-                        !item.loading
-                )
-                .sort(
-                    (a, b) =>
-                        a.index -
-                        b.index
-                );
-
-        /*
-         * Continue normal thumbnail loading.
-         */
-
-        processThumbnailQueue(
-            thumbnailLoadSession
-        );
-
-        };
-
-    /*
-     * Check after the current image has had
-     * a chance to finish.
-     */
-
-    setTimeout(
-        finishPriorityCheck,
-        0
-    );
-
+    setTimeout(finishPriorityCheck, 0);
 }
 
 function scheduleThumbnailVisibilityCheck() {
-
-	clearTimeout(
-		thumbnailScrollTimer
-	);
-
-	/*
-	 * -------------------------------------------------
-	 * PAUSE BACKGROUND QUEUE
-	 * -------------------------------------------------
-	 *
-	 * This does NOT cancel an active image download.
-	 * It simply prevents the queue from immediately
-	 * starting another background image.
-	 */
-
-	thumbnailPriorityMode =
-		true;
-
-	thumbnailScrollTimer =
-		setTimeout(
-			() => {
-
-				thumbnailScrollTimer =
-					null;
-
-				prioritizeVisibleThumbnails();
-
-			},
-			THUMBNAIL_SETTLE_DELAY
-		);
-
+    if (thumbnailPriorityPaused)
+        return;
+    clearTimeout(thumbnailScrollTimer);
+    thumbnailPriorityMode = true;
+    thumbnailScrollTimer = setTimeout(() => {
+        thumbnailScrollTimer = null;
+        prioritizeVisibleThumbnails();
+    }, THUMBNAIL_SETTLE_DELAY);
 }
 
 function startThumbnailLoading() {
+    stopThumbnailLoading();
+    const gallery = document.getElementById("gallery");
+    if (!gallery)
+        return;
 
-	stopThumbnailLoading();
+    const session = thumbnailLoadSession;
+    const slots = getThumbnailSlots();
+    if (!slots.length)
+        return;
 
-	const gallery =
-		document.getElementById(
-			"gallery");
+    rebuildThumbnailQueue(false, true);
+    thumbnailPriorityMode = false;
+    processThumbnailQueue(session);
 
-	if (!gallery)
-		return;
+    thumbnailObserver = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting))
+            scheduleThumbnailVisibilityCheck();
+    }, {root: null, rootMargin: "0px", threshold: 0});
 
-	const session =
-		thumbnailLoadSession;
-
-	const slots =
-		getThumbnailSlots();
-
-	if (
-		!slots.length
-	) {
-
-		return;
-
-	}
-
-	/*
-	 * -------------------------------------------------
-	 * INITIAL LOAD
-	 * -------------------------------------------------
-	 *
-	 * Initial visible images first.
-	 */
-
-	const visibleSlots =
-		getVisibleThumbnailSlots();
-
-	const initial =
-		[];
-
-	visibleSlots.forEach(
-		slot => {
-
-			const index =
-				Number(
-					slot.dataset.index
-				);
-
-			const item =
-				thumbnailItems.find(
-					entry =>
-						entry.index ===
-						index
-				);
-
-			if (
-				item &&
-				!item.loaded
-			) {
-
-				initial.push(
-					item);
-
-			}
-
-		}
-	);
-
-	initial.sort(
-		(a, b) =>
-			a.index -
-			b.index
-	);
-
-	const initialSet =
-		new Set(
-			initial
-		);
-
-	/*
-	 * After the initial visible images,
-	 * resume normal album order.
-	 */
-
-	thumbnailQueue =
-		initial.concat(
-			thumbnailItems.filter(
-				item =>
-					!initialSet.has(
-						item
-					)
-			)
-		);
-
-	/*
-	 * IMPORTANT:
-	 *
-	 * Initial loading is NOT priority mode.
-	 *
-	 * Once the initial visible images are handled,
-	 * the queue is allowed to continue normally
-	 * through offscreen images.
-	 */
-
-	thumbnailPriorityMode =
-		false;
-
-	processThumbnailQueue(
-		session
-	);
-
-	/*
-	 * -------------------------------------------------
-	 * INTERSECTION OBSERVER
-	 * -------------------------------------------------
-	 */
-
-	thumbnailObserver =
-		new IntersectionObserver(
-			entries => {
-
-				const entered =
-					entries.some(
-						entry =>
-							entry.isIntersecting
-					);
-
-				if (
-					entered
-				) {
-
-					scheduleThumbnailVisibilityCheck();
-
-				}
-
-			},
-			{
-				root:
-					null,
-
-				rootMargin:
-					"0px",
-
-				threshold:
-					0
-			}
-		);
-
-	slots.forEach(
-		slot => {
-
-			thumbnailObserver.observe(
-				slot
-			);
-
-		}
-	);
-
-	/*
-	 * -------------------------------------------------
-	 * SCROLL
-	 * -------------------------------------------------
-	 */
-
-	window.addEventListener(
-		"scroll",
-		scheduleThumbnailVisibilityCheck,
-		{
-			passive:
-				true
-		}
-	);
-
-	window.addEventListener(
-		"resize",
-		scheduleThumbnailVisibilityCheck
-	);
-
+    slots.forEach(slot => thumbnailObserver.observe(slot));
+    window.addEventListener("scroll", scheduleThumbnailVisibilityCheck, {passive: true});
+    window.addEventListener("resize", scheduleThumbnailVisibilityCheck);
 }
 
 let mediumItems = [];
 let mediumQueue = [];
 let mediumLoading = false;
-
 let mediumLoadSession = 0;
 
 function stopMediumLoading() {
-
     mediumLoadSession++;
-
-    mediumQueue =
-        [];
-
-    mediumLoading =
-        false;
+    mediumQueue = [];
+    mediumLoading = false;
 }
 
-function loadMedium(
-	item,
-	session) {
-
-	/*console.log(
-		"[MEDIUM DEBUG] BACKGROUND REQUEST:",
-		{
-			index:
-				item && item.index,
-
-			src:
-				item && item.src,
-
-			mediumLoaded:
-				item && item.mediumLoaded,
-
-			mediumLoading:
-				item && item.mediumLoading,
-
-			hasImage:
-				!!(
-					item &&
-					item.mediumImage
-				)
-		}
-	);*/
-
-	return new Promise(
-		resolve => {
-
-			if (
-				!item ||
-				item.mediumLoaded ||
-				item.mediumLoading
-			) {
-
-				resolve();
-
-				return;
-
-			}
-
-			if (
-				session !==
-				mediumLoadSession
-			) {
-
-				resolve();
-
-				return;
-
-			}
-
-			/*
-			 * -------------------------------------------------
-			 * MEDIUM URL
-			 * -------------------------------------------------
-			 */
-
-			const mediumURL =
-				item.mediumSrc ||
-				item.src;
-
-			if (!mediumURL) {
-
-				resolve();
-
-				return;
-
-			}
-
-			/*
-			 * -------------------------------------------------
-			 * GET THE EXISTING MEDIUM IMAGE
-			 * -------------------------------------------------
-			 *
-			 * The Medium queue now uses the actual image
-			 * already contained inside the thumbnail slot.
-			 *
-			 * Do NOT create another Image() here.
-			 */
-
-			const img =
-				item.mediumImage;
-
-			if (!img) {
-
-				console.warn(
-					"[MEDIUM] No Medium image element:",
-					item.index,
-					mediumURL
-				);
-
-				resolve();
-
-				return;
-
-			}
-
-			/*
-			 * -------------------------------------------------
-			 * START MEDIUM LOAD
-			 * -------------------------------------------------
-			 */
-
-			item.mediumLoading =
-				true;
-
-			const finish =
-				success => {
-
-				img.onload =
-					null;
-
-				img.onerror =
-					null;
-
-				item.mediumLoading =
-					false;
-
-				if (
-					session !==
-					mediumLoadSession
-				) {
-
-					resolve();
-
-					return;
-
-				}
-
-				if (success) {
-
-					item.mediumLoaded =
-						true;
-
-					/*
-					 * The actual Medium image in the
-					 * gallery has now finished loading.
-					 */
-
-					img.style.visibility =
-						"visible";
-						
-					img.style.opacity =
-						"1";
-
-					/*
-					 * Keep the Medium image above the
-					 * thumbnail.
-					 */
-
-					/*img.style.zIndex =
-						"2";*/
-
-					/*console.log(
-						"[MEDIUM] LOADED:",
-						item.index,
-						mediumURL
-					);*/
-
-				}
-				else {
-
-					console.warn(
-						"[MEDIUM] Failed:",
-						mediumURL
-					);
-
-					/*
-					 * Only clear the src. Do not throw
-					 * away the DOM element because the
-					 * slot still owns it.
-					 */
-
-					img.removeAttribute(
-						"src"
-					);
-
-				}
-
-				resolve();
-
-			};
-
-			const onLoad =
-				() => {
-
-				finish(
-					true
-				);
-
-			};
-
-			const onError =
-				() => {
-
-				finish(
-					false
-				);
-
-			};
-
-			img.onload =
-				onLoad;
-
-			img.onerror =
-				onError;
-
-			/*
-			 * -------------------------------------------------
-			 * LOAD INTO THE EXISTING DOM IMAGE
-			 * -------------------------------------------------
-			 */
-
-			img.src =
-				mediumURL;
-
-		}
-	);
-}
-
-async function processMediumQueue(
-    session) {
-
-    if (
-        mediumLoading ||
-        thumbnailPriorityPaused
-    ) {
-
+function rebuildMediumQueue(prioritizeVisible = false, includeFailed = true) {
+    const eligible = mediumItems.filter(item => {
+        if (!item || item.mediumLoaded || item.mediumLoading)
+            return false;
+        const thumbnail = thumbnailItems.find(entry => entry.index === item.index);
+        if (!thumbnail || !thumbnail.loaded)
+            return false;
+        return !!item.src || item.source === "telegram";
+    });
+
+    const failed = eligible.filter(item => item.mediumFailed);
+    const normal = eligible.filter(item => !item.mediumFailed);
+
+    if (!prioritizeVisible) {
+        mediumQueue = normal.sort((a, b) => a.index - b.index);
+        if (includeFailed)
+            mediumQueue.push(...failed.sort((a, b) => a.index - b.index));
         return;
-
     }
 
-    mediumLoading =
-        true;
+    const visible = new Set(getVisibleThumbnailSlots()
+        .map(slot => Number(slot.dataset.index)));
+    const visibleItems = normal.filter(item => visible.has(item.index));
+    const remaining = normal.filter(item => !visible.has(item.index));
+    mediumQueue = visibleItems.sort((a, b) => a.index - b.index)
+        .concat(remaining.sort((a, b) => a.index - b.index));
+    if (includeFailed)
+        mediumQueue.push(...failed.sort((a, b) => a.index - b.index));
+}
 
-    while (
-        mediumQueue.length &&
-        session ===
-            mediumLoadSession &&
-        !thumbnailPriorityPaused
-    ) {
-
-        const item =
-            mediumQueue.shift();
-
-        if (
-            !item ||
-            item.mediumLoaded ||
-            item.mediumLoading
-        ) {
-
-            continue;
-
+function loadMedium(item, session) {
+    return new Promise(resolve => {
+        if (!item || item.mediumLoaded || item.mediumLoading || session !== mediumLoadSession) {
+            resolve();
+            return;
         }
 
-        await loadMedium(
-            item,
-            session
-        );
+        const thumbnail = thumbnailItems.find(entry => entry.index === item.index);
+        if (!thumbnail || !thumbnail.loaded) {
+            resolve();
+            return;
+        }
 
+        const img = item.mediumImage;
+        if (!img) {
+            resolve();
+            return;
+        }
+
+        item.mediumLoading = true;
+        item.mediumFailed = false;
+
+        const finish = success => {
+            img.onload = null;
+            img.onerror = null;
+            item.mediumLoading = false;
+            if (session !== mediumLoadSession) {
+                resolve();
+                return;
+            }
+
+            if (success) {
+                item.mediumLoaded = true;
+                item.mediumFailed = false;
+                img.style.visibility = "visible";
+                img.style.opacity = "1";
+
+                thumbnail.mediumSrc = item.src;
+                thumbnail.fullSrc = getImageURLs(item.image).full;
+                thumbnail.mediumLoaded = true;
+                thumbnail.mediumImage = img;
+                thumbnail.mediumBlobURL = item.mediumBlobURL || item.src;
+
+                if (thumbnail.slot) {
+                    const thumbImg = thumbnail.img;
+                    if (thumbImg && img.src) {
+                        thumbImg.style.visibility = "hidden";
+                        thumbImg.style.opacity = "0";
+                    }
+                }
+            } else {
+                item.mediumLoaded = false;
+                item.mediumFailed = true;
+                img.removeAttribute("src");
+                noteImageFailure();
+                console.debug("[MEDIUM] Failed; deferred for retry", {
+                    index: item.index,
+                    source: item.source,
+                    url: item.src || null
+                });
+            }
+            resolve();
+        };
+
+        img.onload = () => finish(true);
+        img.onerror = () => finish(false);
+        resolveImageAsset(item, "medium", () => session === mediumLoadSession)
+            .then(url => {
+                if (!url || session !== mediumLoadSession) {
+                    finish(false);
+                    return;
+                }
+                item.src = url;
+                item.mediumBlobURL = url;
+                img.src = url;
+            })
+            .catch(error => {
+                console.debug("[MEDIUM] Asset resolution failed", {
+                    index: item.index,
+                    source: item.source,
+                    errorName: error?.name,
+                    errorMessage: error?.message
+                });
+                finish(false);
+            });
+    });
+}
+
+async function processMediumQueue(session) {
+    if (mediumLoading || thumbnailPriorityPaused || session !== mediumLoadSession)
+        return;
+
+    mediumLoading = true;
+
+    while (mediumQueue.length && session === mediumLoadSession && !thumbnailPriorityPaused) {
+        const item = mediumQueue.shift();
+        if (!item || item.mediumLoaded || item.mediumLoading)
+            continue;
+
+        const thumbnail = thumbnailItems.find(entry => entry.index === item.index);
+        if (!thumbnail || !thumbnail.loaded)
+            continue;
+
+        if (item.mediumFailed) {
+            mediumQueue.push(item);
+            if (!mediumQueue.some(entry => entry && !entry.mediumLoaded && !entry.mediumLoading && !entry.mediumFailed))
+                break;
+            continue;
+        }
+
+        await loadMedium(item, session);
     }
 
-    mediumLoading =
-        false;
+    mediumLoading = false;
+
+    if (thumbnailPriorityPaused || session !== mediumLoadSession)
+        return;
+
+    const remainingNormal = mediumItems.some(item => {
+        const thumbnail = item && thumbnailItems.find(entry => entry.index === item.index);
+        return item && thumbnail?.loaded && !item.mediumLoaded && !item.mediumLoading && !item.mediumFailed;
+    });
+
+    if (remainingNormal) {
+        rebuildMediumQueue(false, true);
+        processMediumQueue(session);
+        return;
+    }
+
+    if (mediumItems.some(item => item && !item.mediumLoaded && item.mediumFailed)) {
+        imageRetryPending = true;
+        scheduleImageRetry();
+    }
 }
 
 function prioritizeVisibleMediums() {
-
-    if (
-        thumbnailPriorityPaused
-    ) {
-
+    if (thumbnailPriorityPaused)
         return;
-
-    }
-
-    const slots =
-        getThumbnailSlots();
-
-    if (
-        !slots.length
-    )
-        return;
-
-    const visibleSlots =
-        slots
-            .map(
-                (slot, position) => {
-
-                    const rect =
-                        slot.getBoundingClientRect();
-
-                    return {
-                        slot,
-                        position,
-                        rect
-                    };
-
-                }
-            )
-            .filter(
-                item => {
-
-                    return (
-                        item.rect.bottom > 0 &&
-                        item.rect.top <
-                            window.innerHeight &&
-                        item.rect.right > 0 &&
-                        item.rect.left <
-                            window.innerWidth
-                    );
-
-                }
-            )
-            .sort(
-                (a, b) => {
-
-                    if (
-                        Math.abs(
-                            a.rect.top -
-                            b.rect.top
-                        ) > 1
-                    ) {
-
-                        return (
-                            a.rect.top -
-                            b.rect.top
-                        );
-
-                    }
-
-                    return (
-                        a.rect.left -
-                        b.rect.left
-                    );
-
-                }
-            );
-
-    const priority =
-        [];
-
-    const seen =
-        new Set();
-
-    visibleSlots.forEach(
-        visible => {
-
-            const item =
-                mediumItems[
-                    visible.position
-                ];
-
-            if (!item)
-                return;
-
-            if (
-                item.mediumLoaded ||
-                item.mediumLoading
-            )
-                return;
-
-            if (
-                seen.has(item)
-            )
-                return;
-
-            seen.add(item);
-
-            priority.push(item);
-
-        }
-    );
-
-    if (
-        !priority.length
-    )
-        return;
-
-    const prioritySet =
-        new Set(priority);
-
-    mediumQueue =
-        mediumQueue.filter(
-            item =>
-                !prioritySet.has(item)
-        );
-
-    priority.sort(
-        (a, b) =>
-            a.index -
-            b.index
-    );
-
-    mediumQueue =
-        priority.concat(
-            mediumQueue
-        );
-
-    processMediumQueue(
-        mediumLoadSession
-    );
+    mediumItems.forEach(item => {
+        if (item && item.mediumFailed)
+            item.mediumFailed = false;
+    });
+    rebuildMediumQueue(true, true);
+    processMediumQueue(mediumLoadSession);
 }
 
 function startMediumLoading() {
-	if (
-		mediumLoading
-	) {
+    if (mediumLoading)
+        return;
 
-		return;
-
-	}
     stopMediumLoading();
-
-    const session =
-        mediumLoadSession;
-
-    if (
-        !mediumItems.length
-    )
+    const session = mediumLoadSession;
+    if (!mediumItems.length)
         return;
 
-    const slots =
-        getThumbnailSlots();
-
-    const visibleSlots =
-        slots
-            .filter(
-                slot => {
-
-                    const rect =
-                        slot.getBoundingClientRect();
-
-                    return (
-                        rect.bottom > 0 &&
-                        rect.top <
-                            window.innerHeight &&
-                        rect.right > 0 &&
-                        rect.left <
-                            window.innerWidth
-                    );
-
-                }
-            );
-
-    const initial =
-        [];
-
-    visibleSlots.forEach(
-        slot => {
-
-            const index =
-                Number(
-                    slot.dataset.index
-                );
-
-            const item =
-                mediumItems.find(
-                    entry =>
-                        entry.index ===
-                        index
-                );
-
-            if (
-                item &&
-                !item.mediumLoaded &&
-                !item.mediumLoading &&
-                item.src
-            ) {
-
-                initial.push(
-                    item
-                );
-
-            }
-
-        }
-    );
-
-    initial.sort(
-        (a, b) =>
-            a.index -
-            b.index
-    );
-
-    const initialSet =
-        new Set(initial);
-
-    mediumQueue =
-        initial.concat(
-            mediumItems.filter(
-                item =>
-                    !initialSet.has(item) &&
-                    !item.mediumLoaded &&
-                    !item.mediumLoading &&
-                    item.src
-            )
-        );
-
-    processMediumQueue(
-        session
-    );
+    rebuildMediumQueue(false, true);
+    processMediumQueue(session);
 }
 
-function findMediumItem(
-	src) {
-
-	if (!src)
-		return null;
-
-	return mediumItems.find(
-		item =>
-			item &&
-			(
-				item.mediumSrc === src ||
-				item.src === src
-			)
-	) || null;
+function findMediumItem(src) {
+    if (!src)
+        return null;
+    return mediumItems.find(item => item && (item.mediumSrc === src || item.src === src)) || null;
 }
 
-function markMediumItemLoaded(
-	url,
-	image,
-	blobURL = null
-) {
+function markMediumItemLoaded(url, image, blobURL = null) {
+    if (!url)
+        return null;
+    const item = findMediumItem(url);
+    if (!item)
+        return null;
 
-	if (!url)
-		return null;
+    item.mediumLoaded = true;
+    item.mediumFailed = false;
+    item.mediumLoading = false;
+    item.mediumImage = image || item.mediumImage;
+    item.mediumBlobURL = blobURL || item.mediumBlobURL;
 
-	const item =
-		findMediumItem(
-			url
-		);
-
-	if (!item) {
-
-		console.warn(
-			"[MEDIUM] Could not find item for modal URL:",
-			url
-		);
-
-		return null;
-
-	}
-
-	/*
-	 * -------------------------------------------------
-	 * KEEP THE EXISTING MEDIUM IMAGE ELEMENT
-	 * -------------------------------------------------
-	 *
-	 * item.mediumImage must remain the actual
-	 * <img> element belonging to the thumbnail slot.
-	 *
-	 * DO NOT replace it with the decoded Image()
-	 * produced by the modal loader.
-	 */
-
-	const img =
-		item.mediumImage;
-
-	if (!img) {
-
-		console.warn(
-			"[MEDIUM] Item has no Medium image element:",
-			item.index,
-			url
-		);
-
-		return null;
-
-	}
-
-	/*
-	 * -------------------------------------------------
-	 * USE THE MODAL DOWNLOAD IN THE EXISTING ELEMENT
-	 * -------------------------------------------------
-	 *
-	 * The modal has already downloaded and decoded
-	 * this image, so use its blob URL instead of
-	 * starting another network request.
-	 */
-
-	const mediumURL =
-		blobURL;
-
-	if (!mediumURL) {
-
-		console.warn(
-			"[MEDIUM] Modal Medium has no blob URL:",
-			url
-		);
-
-		return null;
-
-	}
-
-	item.mediumLoading =
-		true;
-
-	/*
-	 * -------------------------------------------------
-	 * WAIT FOR THE EXISTING DOM IMAGE TO PROCESS IT
-	 * -------------------------------------------------
-	 *
-	 * This deliberately mirrors loadMedium().
-	 */
-
-	const finish =
-		success => {
-
-		img.onload =
-			null;
-
-		img.onerror =
-			null;
-
-		item.mediumLoading =
-			false;
-
-		if (success) {
-
-			item.mediumLoaded =
-				true;
-
-			img.style.visibility =
-				"visible";
-
-			img.style.opacity =
-				"1";
-
-			/*console.log(
-				"[MEDIUM] MODAL -> DOM LOADED:",
-				item.index,
-				url
-			);*/
-
-		}
-		else {
-
-			item.mediumLoaded =
-				false;
-
-			console.warn(
-				"[MEDIUM] Modal -> DOM failed:",
-				url
-			);
-
-			img.removeAttribute(
-				"src"
-			);
-
-		}
-
-	};
-
-	const onLoad =
-		() => {
-
-		finish(
-			true
-		);
-
-	};
-
-	const onError =
-		() => {
-
-		finish(
-			false
-		);
-
-	};
-
-	img.onload =
-		onLoad;
-
-	img.onerror =
-		onError;
-
-	/*
-	 * -------------------------------------------------
-	 * PUT THE MODAL'S BLOB INTO THE EXISTING
-	 * MEDIUM-IMAGE ELEMENT
-	 * -------------------------------------------------
-	 */
-
-	img.src =
-		mediumURL;
-
-	/*
-	 * -------------------------------------------------
-	 * STORE THE BLOB URL
-	 * -------------------------------------------------
-	 */
-
-	item.mediumBlobURL =
-		mediumURL;
-
-	/*
-	 * -------------------------------------------------
-	 * REMOVE FROM BACKGROUND QUEUE
-	 * -------------------------------------------------
-	 */
-
-	mediumQueue =
-		mediumQueue.filter(
-			queueItem =>
-				queueItem !== item
-		);
-
-	return item;
-}
-
-async function reloadAlbums() {
-
-    albums.length = 0;
-
-    /*
-     * -------------------------------------------------
-     * GITHUB URL
-     * -------------------------------------------------
-     */
-
-    const GITHUB_STORAGE_KEY =
-        "githubID";
-
-    const query =
-        window.location.search.substring(1);
-
-    let pasteID =
-        null;
-
-    /*
-     * Explicit GitHub URL in URL:
-     *
-     * ?@BASE64_GITHUB_URL
-     */
-
-    if (
-        query.startsWith("@")
-    ) {
-
-        pasteID =
-            decodeBase64URL(
-                query.substring(1)
-            );
-
-        if (
-            !pasteID
-        ) {
-
-            console.error(
-                "[ALBUMS] Invalid GitHub URL identifier."
-            );
-
-            pasteID =
-                null;
-
+    const thumbnail = thumbnailItems.find(entry => entry.index === item.index);
+    if (thumbnail) {
+        thumbnail.mediumLoaded = true;
+        thumbnail.mediumImage = item.mediumImage;
+        thumbnail.mediumBlobURL = item.mediumBlobURL;
+        thumbnail.mediumSrc = blobURL || url;
+        if (thumbnail.slot && thumbnail.img) {
+            thumbnail.img.style.visibility = "hidden";
+            thumbnail.img.style.opacity = "0";
         }
-        else {
-
-            /*
-             * Save the decoded GitHub URL for
-             * future page loads.
-             */
-
-            localStorage.setItem(
-                GITHUB_STORAGE_KEY,
-                pasteID
-            );
-
-        }
-
     }
 
-    /*
-     * No GitHub URL in the current URL.
-     *
-     * Try the previously saved one.
-     */
-
-    else {
-
-        pasteID =
-            localStorage.getItem(
-                GITHUB_STORAGE_KEY
-            );
-
-    }
-
-    /*
-     * -------------------------------------------------
-     * GET MANUAL ALBUMS
-     * -------------------------------------------------
-     */
-
-    let manualAlbums = [];
-
-    /*
-     * -------------------------------------------------
-     * GITHUB
-     * -------------------------------------------------
-     */
-
-    if (pasteID) {
-
-        try {
-
-            const response =
-                await fetch(
-                    pasteID
-                );
-
-            if (!response.ok) {
-
-                throw new Error(
-                    `HTTP ${response.status}`
-                );
-
-            }
-
-            const text =
-                await response.text();
-
-            /*
-             * -------------------------------------------------
-             * FIND MANUAL_ALBUMS
-             * -------------------------------------------------
-             */
-
-            const start =
-                text.indexOf(
-                    "MANUAL_ALBUMS"
-                );
-
-            if (
-                start === -1
-            ) {
-
-                throw new Error(
-                    "MANUAL_ALBUMS was not found in GitHub file."
-                );
-
-            }
-
-            const arrayStart =
-                text.indexOf(
-                    "[",
-                    start
-                );
-
-            if (
-                arrayStart === -1
-            ) {
-
-                throw new Error(
-                    "MANUAL_ALBUMS array start was not found."
-                );
-
-            }
-
-            /*
-             * -------------------------------------------------
-             * FIND MATCHING ]
-             * -------------------------------------------------
-             */
-
-            let depth =
-                0;
-
-            let arrayEnd =
-                -1;
-
-            let inString =
-                false;
-
-            let stringChar =
-                null;
-
-            let escaped =
-                false;
-
-            for (
-                let i = arrayStart;
-                i < text.length;
-                i++
-            ) {
-
-                const char =
-                    text[i];
-
-                if (escaped) {
-
-                    escaped =
-                        false;
-
-                    continue;
-
-                }
-
-                if (inString) {
-
-                    if (
-                        char === "\\"
-                    ) {
-
-                        escaped =
-                            true;
-
-                    }
-                    else if (
-                        char === stringChar
-                    ) {
-
-                        inString =
-                            false;
-
-                        stringChar =
-                            null;
-
-                    }
-
-                    continue;
-
-                }
-
-                if (
-                    char === '"' ||
-                    char === "'" ||
-                    char === "`"
-                ) {
-
-                    inString =
-                        true;
-
-                    stringChar =
-                        char;
-
-                    continue;
-
-                }
-
-                if (
-                    char === "["
-                ) {
-
-                    depth++;
-
-                }
-                else if (
-                    char === "]"
-                ) {
-
-                    depth--;
-
-                    if (
-                        depth === 0
-                    ) {
-
-                        arrayEnd =
-                            i;
-
-                        break;
-
-                    }
-
-                }
-
-            }
-
-            if (
-                arrayEnd === -1
-            ) {
-
-                throw new Error(
-                    "Could not find end of MANUAL_ALBUMS."
-                );
-
-            }
-
-            const arrayText =
-                text.substring(
-                    arrayStart,
-                    arrayEnd + 1
-                );
-
-            /*
-             * -------------------------------------------------
-             * CONVERT TEXT TO ARRAY
-             * -------------------------------------------------
-             */
-
-            manualAlbums =
-                Function(
-                    `"use strict"; return (${arrayText});`
-                )();
-
-            if (
-                !Array.isArray(
-                    manualAlbums
-                )
-            ) {
-
-                throw new Error(
-                    "Extracted MANUAL_ALBUMS is not an array."
-                );
-
-            }
-
-        }
-        catch (error) {
-
-            console.error(
-                "[ALBUMS] GitHub error:",
-                error
-            );
-
-            manualAlbums =
-                [];
-
-        }
-
-    }
-
-    /*
-     * -------------------------------------------------
-     * LOCAL albums.js
-     * -------------------------------------------------
-     *
-     * Only use the local MANUAL_ALBUMS when there
-     * is no saved/explicit GitHub URL.
-     */
-
-    else if (
-        typeof MANUAL_ALBUMS !==
-        "undefined"
-    ) {
-
-        manualAlbums =
-            MANUAL_ALBUMS;
-
-    }
-
-    /*
-     * -------------------------------------------------
-     * ADD MANUAL / GITHUB ALBUMS
-     * -------------------------------------------------
-     */
-
-    manualAlbums.forEach(
-        album => {
-
-            albums.push({
-
-                id:
-                    album.id,
-
-                name:
-                    album.name,
-
-                images:
-                    parseQuery(
-                        getAlbumQuery(
-                            album.url
-                        )
-                    ),
-
-                tags:
-                    album.tags ||
-                    []
-
-            });
-
-        }
-    );
-
-    /*
-     * -------------------------------------------------
-     * SAVED LOCALSTORAGE ALBUMS
-     * -------------------------------------------------
-     */
-
-    const saved =
-        JSON.parse(
-            localStorage.getItem(
-                "savedAlbums"
-            ) || "[]"
-        );
-
-    saved.forEach(
-        album => {
-
-            albums.push({
-
-                ...album,
-
-                tags:
-                    album.tags ||
-                    [],
-
-                storage:
-                    true
-
-            });
-
-        }
-    );
-
+    mediumQueue = mediumQueue.filter(queueItem => queueItem !== item);
+    return item;
 }
-
-function showAlbumButtons(show) {
-
-    document.getElementById("backButton").style.display =
-        show ? "" : "none";
-
-    document.getElementById("saveButton").style.display =
-        (
-            show &&
-            (
-                isQueryAlbum ||
-                currentTemporaryAlbumID !== null
-            )
-        )
-            ? "flex"
-            : "none";
-
-    document.getElementById("regenerateAlbum").style.display =
-        show ? "" : "none";
-
-    document.getElementById("tagToggle").style.display =
-        show ? "" : "none";
-}
-
-function saveCurrentAlbum() {
-
-    if (!currentAlbum)
-        return;
-
-    const saved = JSON.parse(
-            localStorage.getItem("savedAlbums") || "[]");
-
-    // Find next album number
-    // Find next Temp album number
-    let number = 1;
-
-    saved.forEach(album => {
-
-        const match = album.name.match(/^Temp_(\d+)$/);
-
-        if (match) {
-            const n = Number(match[1]);
-
-            if (n >= number) {
-                number = n + 1;
-            }
-        }
-
-    });
-
-    saved.push({
-        id: crypto.randomUUID(),
-        name: `Temp_${number}`,
-        images: currentAlbum.images,
-        tags: currentAlbum.tags || []
-    });
-
-    localStorage.setItem(
-        "savedAlbums",
-        JSON.stringify(saved));
-		
-	if (
-		currentTemporaryAlbumID
-	) {
-
-		deleteTemporaryAlbum(
-			currentTemporaryAlbumID
-		);
-
-		currentTemporaryAlbumID =
-			null;
-
-	}
-
-    alert("Album saved as " + `Temp_${number}`);
-}
-
-const modal =
-    document.getElementById("modal");
-
-let suppressModalClick = false;
-
-function resetImageTransform() {
-
-    imgTransform.x = 0;
-    imgTransform.y = 0;
-    imgTransform.scale = minZoom;
-
-    applyTransform();
-}
-
-let modalImgSmall = null;
-let modalImgMedium = null;
-let modalImgFull = null;
-
-let modalMediumLoaded = false;
-let modalMediumLoading = false;
-let modalMediumImage = null;
 
 let fullImageLoading = false;
 let fullImageLoaded = false;
@@ -4312,16 +2964,15 @@ const zoomTargetStrength = 1.85;
 const imagePanBoundaryMultiplier = 1;
 
 const autoResolutionSwitch = true;
-const autoResolutionSwitchDelay = 500;
-const autoResolutionSwitchRatio = 0.125;
+const autoResolutionSwitchDelay = 400;
+const autoResolutionSwitchRatio = 0.10;
 
 const resolutionSwitchOnZoom = true;
 const resolutionSwitchOnPan = false;
 const resolutionSwitchDelay = 100;
-const resolutionSwitchRatio = 0.250;
+const resolutionSwitchRatio = 0.10;
 
 let centerAnimationFrame = null;
-let centerAnimationStart = 0;
 
 let centerReturnTimer = null;
 let centerReturnAnimation = null;
@@ -4354,12 +3005,6 @@ async function load(url, name, loadID) {
 	if (!url)
 		return;
 
-	/*
-	 * -------------------------------------------------
-	 * PREVENT DUPLICATE FULL DOWNLOADS
-	 * -------------------------------------------------
-	 */
-
 	if (name === "full") {
 
 		if (fullImageLoading)
@@ -4369,12 +3014,6 @@ async function load(url, name, loadID) {
 			true;
 
 	}
-
-	/*
-	 * -------------------------------------------------
-	 * LOADING UI
-	 * -------------------------------------------------
-	 */
 
 	const loadingBar =
 		document.getElementById(
@@ -4416,12 +3055,6 @@ async function load(url, name, loadID) {
 
 	};
 
-	/*
-	 * -------------------------------------------------
-	 * RESET LOADING BAR
-	 * -------------------------------------------------
-	 */
-
 	if (
 		name === "medium" ||
 		name === "full") {
@@ -4442,23 +3075,15 @@ async function load(url, name, loadID) {
 
 	}
 
-	/*
-	 * -------------------------------------------------
-	 * ABORT CONTROLLER
-	 * -------------------------------------------------
-	 */
-
 	const controller =
 		new AbortController();
 
-	activeImageLoaders.push(
-		controller);
+	activeImageLoaders.push(controller);
 
 	const removeLoader = () => {
 
 		const index =
-			activeImageLoaders.indexOf(
-				controller);
+			activeImageLoaders.indexOf(controller);
 
 		if (index !== -1) {
 
@@ -4486,12 +3111,6 @@ async function load(url, name, loadID) {
 
 		}
 
-		/*
-		 * -------------------------------------------------
-		 * CONTENT LENGTH
-		 * -------------------------------------------------
-		 */
-
 		const total =
 			Number(
 				response.headers.get(
@@ -4509,12 +3128,6 @@ async function load(url, name, loadID) {
 		let chunkCount =
 			0;
 
-		/*
-		 * -------------------------------------------------
-		 * DOWNLOAD
-		 * -------------------------------------------------
-		 */
-
 		while (true) {
 
 			const {
@@ -4528,17 +3141,10 @@ async function load(url, name, loadID) {
 
 			chunkCount++;
 
-			chunks.push(
-				value);
+			chunks.push(value);
 
 			received +=
 				value.length;
-
-			/*
-			 * -------------------------------------------------
-			 * SHOW BAR AFTER FIRST REAL CHUNK
-			 * -------------------------------------------------
-			 */
 
 			if (
 				chunkCount === 1 &&
@@ -4556,12 +3162,6 @@ async function load(url, name, loadID) {
 				}
 
 			}
-
-			/*
-			 * -------------------------------------------------
-			 * UPDATE PROGRESS
-			 * -------------------------------------------------
-			 */
 
 			if (
 				isModalLoadActive(loadID) &&
@@ -4606,12 +3206,6 @@ async function load(url, name, loadID) {
 
 		}
 
-		/*
-		 * -------------------------------------------------
-		 * DOWNLOAD COMPLETE
-		 * -------------------------------------------------
-		 */
-
 		if (
 			isModalLoadActive(loadID) &&
 			loadingProgress) {
@@ -4620,12 +3214,6 @@ async function load(url, name, loadID) {
 				"100%";
 
 		}
-
-		/*
-		 * -------------------------------------------------
-		 * BUILD BLOB
-		 * -------------------------------------------------
-		 */
 
 		const blob =
 			new Blob(
@@ -4637,29 +3225,11 @@ async function load(url, name, loadID) {
 			});
 
 		const blobURL =
-			URL.createObjectURL(
-				blob);
-
-		/*
-		 * -------------------------------------------------
-		 * CHECK FOR CLOSED / STALE MODAL
-		 * -------------------------------------------------
-		 */
+			URL.createObjectURL(blob);
 
 		if (!isModalLoadActive(loadID)) {
 
-			URL.revokeObjectURL(
-				blobURL);
-
-			/*
-			 * IMPORTANT:
-			 *
-			 * AbortController cannot cancel a decode
-			 * that has already progressed beyond fetch.
-			 *
-			 * Therefore explicitly release the Full
-			 * loading lock here.
-			 */
+			URL.revokeObjectURL(blobURL);
 
 			if (name === "full") {
 
@@ -4671,12 +3241,6 @@ async function load(url, name, loadID) {
 			return;
 
 		}
-
-		/*
-		 * -------------------------------------------------
-		 * DECODE
-		 * -------------------------------------------------
-		 */
 
 		const decodedImage =
 			new Image();
@@ -4707,18 +3271,9 @@ async function load(url, name, loadID) {
 
 		}
 
-		/*
-		 * -------------------------------------------------
-		 * CHECK AGAIN AFTER DECODE
-		 * -------------------------------------------------
-		 *
-		 * THIS is the important cancellation path.
-		 */
-
 		if (!isModalLoadActive(loadID)) {
 
-			URL.revokeObjectURL(
-				blobURL);
+			URL.revokeObjectURL(blobURL);
 
 			if (name === "full") {
 
@@ -4731,12 +3286,6 @@ async function load(url, name, loadID) {
 
 		}
 
-		/*
-		 * -------------------------------------------------
-		 * THUMBNAIL
-		 * -------------------------------------------------
-		 */
-
 		if (name === "thumb") {
 
 			if (modalImgSmall) {
@@ -4744,8 +3293,7 @@ async function load(url, name, loadID) {
 				modalImgSmall.src =
 					blobURL;
 
-				resizeThumb(
-					modalImgSmall);
+				resizeThumb(modalImgSmall);
 
 				modalImgSmall.style.visibility =
 					"visible";
@@ -4775,23 +3323,10 @@ async function load(url, name, loadID) {
 
 		}
 
-		/*
-		 * -------------------------------------------------
-		 * MEDIUM
-		 * -------------------------------------------------
-		 */
-
 		if (name === "medium") {
 
-			/*console.log(
-				"[MEDIUM DEBUG] MODAL LOAD REACHED:",
-				{
-					url,
-					modalImgMedium:
-						!!modalImgMedium,
-					loadID
-				}
-			);*/
+            if (modalRetry && modalRetry.loadID === loadID && modalRetry.name === name)
+                modalRetry = null;
 
 			if (!modalImgMedium) {
 
@@ -4803,38 +3338,9 @@ async function load(url, name, loadID) {
 			}
 
 			const registeredMedium =
-				markMediumItemLoaded(
-					url,
+				markMediumItemLoaded(url,
 					decodedImage,
-					blobURL
-				);
-
-			/*console.log(
-				"[MEDIUM DEBUG] MODAL REGISTERED:",
-				registeredMedium &&
-				{
-					index:
-						registeredMedium.index,
-
-					src:
-						registeredMedium.src,
-
-					mediumLoaded:
-						registeredMedium.mediumLoaded,
-
-					mediumLoading:
-						registeredMedium.mediumLoading,
-
-					hasImage:
-						!!registeredMedium.mediumImage
-				}
-			);*/
-
-			/*
-			 * -------------------------------------------------
-			 * MEDIUM IMAGE
-			 * -------------------------------------------------
-			 */
+					blobURL);
 
 			modalImgMedium.style.visibility =
 				"hidden";
@@ -4895,12 +3401,6 @@ async function load(url, name, loadID) {
 			modalImgMedium.dataset.showingFull =
 				"false";
 
-			/*
-			 * -------------------------------------------------
-			 * SHOW MEDIUM
-			 * -------------------------------------------------
-			 */
-
 			modalImgMedium.style.visibility =
 				"visible";
 
@@ -4935,24 +3435,12 @@ async function load(url, name, loadID) {
 
 			applyTransform();
 
-			/*
-			 * -------------------------------------------------
-			 * MEDIUM LOADING UI
-			 * -------------------------------------------------
-			 */
-
 			if (loadingProgress) {
 
 				loadingProgress.style.width =
 					"100%";
 
 			}
-
-			/*
-			 * -------------------------------------------------
-			 * START FULL BACKGROUND DOWNLOAD
-			 * -------------------------------------------------
-			 */
 
 			if (modalFullSrc) {
 
@@ -4986,13 +3474,10 @@ async function load(url, name, loadID) {
 
 		}
 
-		/*
-		 * -------------------------------------------------
-		 * FULL
-		 * -------------------------------------------------
-		 */
-
 		if (name === "full") {
+
+            if (modalRetry && modalRetry.loadID === loadID && modalRetry.name === name)
+                modalRetry = null;
 
 			if (!modalImgFull) {
 
@@ -5049,8 +3534,7 @@ async function load(url, name, loadID) {
 
 			if (loadingTimer) {
 
-				clearTimeout(
-					loadingTimer);
+				clearTimeout(loadingTimer);
 
 				loadingTimer =
 					null;
@@ -5067,16 +3551,9 @@ async function load(url, name, loadID) {
 
 			}
 
-			/*
-			 * -------------------------------------------------
-			 * NO MEDIUM
-			 * -------------------------------------------------
-			 */
-
 			if (!modalMediumSrc) {
 
-				imgResize(
-					modalImgFull);
+				imgResize(modalImgFull);
 
 				modalImgFull.style.left =
 					"50%";
@@ -5112,12 +3589,6 @@ async function load(url, name, loadID) {
 
 			}
 
-			/*
-			 * -------------------------------------------------
-			 * MEDIUM EXISTS
-			 * -------------------------------------------------
-			 */
-
 			if (modalImgMedium) {
 
 				modalImgFull.style.width =
@@ -5139,12 +3610,6 @@ async function load(url, name, loadID) {
 
 			applyTransform();
 
-			/*
-			 * -------------------------------------------------
-			 * AUTOMATIC / ZOOM RESOLUTION SWITCH
-			 * -------------------------------------------------
-			 */
-
 			if (
 				!displayingFull &&
 				!imgDragging &&
@@ -5160,8 +3625,7 @@ async function load(url, name, loadID) {
 
 					if (fullSwitchTimer) {
 
-						clearTimeout(
-							fullSwitchTimer);
+						clearTimeout(fullSwitchTimer);
 
 						fullSwitchTimer =
 							null;
@@ -5211,11 +3675,19 @@ async function load(url, name, loadID) {
 
 	} catch (error) {
 
-		/*
-		 * -------------------------------------------------
-		 * ABORTED
-		 * -------------------------------------------------
-		 */
+        if (error?.name !== "AbortError") {
+            noteImageFailure();
+            console.debug(`[MODAL ${name.toUpperCase()}] Load failed; deferred for retry`, {
+                url,
+                errorName: error?.name,
+                errorMessage: error?.message
+            });
+            modalRetry = {
+                url,
+                name,
+                loadID
+            };
+        }
 
 		if (
 			error.name ===
@@ -5239,12 +3711,6 @@ async function load(url, name, loadID) {
 
 		}
 
-		/*
-		 * -------------------------------------------------
-		 * STALE MODAL
-		 * -------------------------------------------------
-		 */
-
 		if (!isModalLoadActive(loadID)) {
 
 			if (name === "full") {
@@ -5264,17 +3730,6 @@ async function load(url, name, loadID) {
 			return;
 
 		}
-
-		console.warn(
-			`[MODAL] ${name.toUpperCase()} failed:`,
-			url,
-			error);
-
-		/*
-		 * -------------------------------------------------
-		 * FULL FAILED
-		 * -------------------------------------------------
-		 */
 
 		if (name === "full") {
 
@@ -5308,12 +3763,6 @@ async function load(url, name, loadID) {
 
 		}
 
-		/*
-		 * -------------------------------------------------
-		 * MEDIUM FAILED
-		 * -------------------------------------------------
-		 */
-
 		if (name === "medium") {
 
 			modalMediumLoaded =
@@ -5321,10 +3770,6 @@ async function load(url, name, loadID) {
 
 			modalMediumLoading =
 				false;
-
-			console.warn(
-				"[MODAL] Medium failed, falling back to Full:",
-				url);
 
 			if (modalFullSrc) {
 
@@ -5338,12 +3783,6 @@ async function load(url, name, loadID) {
 			return;
 
 		}
-
-		/*
-		 * -------------------------------------------------
-		 * FULL FAILED
-		 * -------------------------------------------------
-		 */
 
 		if (name === "full") {
 
@@ -5361,12 +3800,6 @@ async function load(url, name, loadID) {
 			return;
 
 		}
-
-		/*
-		 * -------------------------------------------------
-		 * THUMBNAIL FAILED
-		 * -------------------------------------------------
-		 */
 
 		if (name === "thumb") {
 
@@ -5400,7 +3833,7 @@ function isModalLoadActive(id) {
     return id === modalLoadID;
 }
 
-function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
+async function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 	pauseThumbnailLoading();
 	stopMediumLoading();
 
@@ -5408,9 +3841,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 		sourceThumb?._thumbnailItem || null;
 
 	const mediumItem =
-		findMediumItem(
-			mediumSrc
-		);
+		findMediumItem(mediumSrc);
 
 	const sourceMediumImage =
 		(
@@ -5420,46 +3851,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 		)
 			? mediumItem.mediumImage
 			: null;
-			
-	/*console.log(
-    "[MEDIUM DEBUG] OPEN MODAL:",
-    {
-        mediumSrc:
-            mediumSrc,
-
-        mediumItem:
-            mediumItem
-                ? {
-                    index:
-                        mediumItem.index,
-
-                    src:
-                        mediumItem.src,
-
-                    mediumLoaded:
-                        mediumItem.mediumLoaded,
-
-                    mediumLoading:
-                        mediumItem.mediumLoading,
-
-                    mediumImage:
-                        !!mediumItem.mediumImage,
-
-                    loaded:
-                        mediumItem.loaded,
-
-                    loading:
-                        mediumItem.loading,
-
-                    image:
-                        !!mediumItem.image
-                }
-                : null,
-
-        sourceMediumImage:
-            !!sourceMediumImage
-    }
-);*/
 
     const loadID =
         ++modalLoadID;
@@ -5500,16 +3891,9 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
     displayingFull =
         false;
 
-    /*
-     * -------------------------------------------------
-     * CANCEL PREVIOUS LOADS / TIMERS
-     * -------------------------------------------------
-     */
-
     if (modalMediumTimer) {
 
-        clearTimeout(
-            modalMediumTimer);
+        clearTimeout(modalMediumTimer);
 
         modalMediumTimer =
             null;
@@ -5518,8 +3902,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
     if (fullSwitchTimer) {
 
-        clearTimeout(
-            fullSwitchTimer);
+        clearTimeout(fullSwitchTimer);
 
         fullSwitchTimer =
             null;
@@ -5527,12 +3910,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
     }
 
     cancelImageLoads();
-
-    /*
-     * -------------------------------------------------
-     * MODAL
-     * -------------------------------------------------
-     */
 
     const modal =
         document.getElementById(
@@ -5564,31 +3941,8 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
         document.getElementById(
             "modalFullButton");
 
-    /*
-     * -------------------------------------------------
-     * SHOW MODAL IMMEDIATELY
-     * -------------------------------------------------
-     *
-     * This is important when navigating between images.
-     *
-     * The old Medium / Full images are hidden first,
-     * then the already-existing album thumbnail becomes
-     * the only visible image.
-     */
-
     modal.style.display =
         "flex";
-
-	/*
-	 * -------------------------------------------------
-	 * CAPTURE SOURCE THUMBNAIL
-	 * -------------------------------------------------
-	 *
-	 * sourceThumb is now the thumbnail SLOT/container,
-	 * not the actual thumbnail <img>.
-	 *
-	 * Get the actual thumbnail image from inside it.
-	 */
 
 	let sourceThumbRect =
 		null;
@@ -5602,9 +3956,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 	if (sourceThumb) {
 
 		sourceThumbnailImage =
-			sourceThumb.querySelector(
-				".thumbnail-image"
-			);
+			sourceThumb.querySelector(".thumbnail-image");
 
 		if (sourceThumbnailImage) {
 
@@ -5635,18 +3987,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 		}
 
 	}
-
-    /*
-     * -------------------------------------------------
-     * RESET SMALL
-     * -------------------------------------------------
-     *
-     * Small is the temporary/initial image.
-     *
-     * It is placed ABOVE Medium and Full so there is
-     * never a frame where an old resolution can show
-     * through while the new image is downloading.
-     */
 
     if (modalImgSmall) {
 
@@ -5680,27 +4020,12 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
         modalImgSmall.src =
             "";
 
-        /*
-         * -------------------------------------------------
-         * REUSE ALBUM THUMBNAIL
-         * -------------------------------------------------
-         *
-         * Do NOT fetch thumbSrc here.
-         *
-         * The thumbnail is already loaded by the gallery.
-         */
-
         if (
             sourceThumb &&
             sourceThumbSrc) {
 
             modalImgSmall.src =
                 sourceThumbSrc;
-
-            /*
-             * Preserve the thumbnail's current displayed
-             * dimensions.
-             */
 
             if (sourceThumbRect) {
 
@@ -5714,30 +4039,12 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
             }
 
-            /*
-             * Make it visible immediately.
-             */
-
             modalImgSmall.style.visibility =
                 "visible";
 
         }
 
     }
-
-    /*
-     * -------------------------------------------------
-     * RESET MEDIUM
-     * -------------------------------------------------
-     *
-     * IMPORTANT:
-     *
-     * Medium starts HIDDEN.
-     *
-     * Previously this was "visible", which allowed the
-     * previous image to remain visible while the new
-     * Medium was downloading.
-     */
 
     if (modalImgMedium) {
 
@@ -5766,12 +4073,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
             "contain";
 
     }
-
-    /*
-     * -------------------------------------------------
-     * RESET FULL
-     * -------------------------------------------------
-     */
 
     if (modalImgFull) {
 
@@ -5810,16 +4111,9 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * RESET LOADING UI
-     * -------------------------------------------------
-     */
-
     if (loadingTimer) {
 
-        clearTimeout(
-            loadingTimer);
+        clearTimeout(loadingTimer);
 
         loadingTimer =
             null;
@@ -5832,12 +4126,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
             "active");
 
     }
-
-    /*
-     * -------------------------------------------------
-     * RESET TRANSFORM
-     * -------------------------------------------------
-     */
 
     imgTransform = {
 
@@ -5866,12 +4154,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
     zoomSwitchedFromFull =
         false;
 
-    /*
-     * -------------------------------------------------
-     * RESET ZOOM ANCHOR
-     * -------------------------------------------------
-     */
-
     zooming =
         false;
 
@@ -5883,12 +4165,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
     let stage =
         -1;
-
-    /*
-     * -------------------------------------------------
-     * FULL-RESOLUTION BUTTON
-     * -------------------------------------------------
-     */
 
     if (fullButton) {
 
@@ -5949,8 +4225,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
                     if (fullSwitchTimer) {
 
-                        clearTimeout(
-                            fullSwitchTimer);
+                        clearTimeout(fullSwitchTimer);
 
                         fullSwitchTimer =
                             null;
@@ -5981,14 +4256,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * DISPLAY A LOADED STAGE
-     * -------------------------------------------------
-     */
-
-    function display(
-        url,
+    function display(url,
         resize,
         newStage) {
 
@@ -5998,10 +4266,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
         if (newStage <= stage)
             return;
 
-        /*
-         * Full loads in the background.
-         */
-
         if (newStage === 2) {
 
             fullImageLoaded =
@@ -6009,7 +4273,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
             modalFullLoaded =
                 true;
-				
+
 			resumeThumbnailLoading();
 
             return;
@@ -6019,12 +4283,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
         stage =
             newStage;
 
-        /*
-         * -------------------------------------------------
-         * THUMBNAIL
-         * -------------------------------------------------
-         */
-
         if (newStage === 0) {
 
             if (!modalImgSmall)
@@ -6033,8 +4291,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
             modalImgSmall.src =
                 url;
 
-            resizeThumb(
-                modalImgSmall);
+            resizeThumb(modalImgSmall);
 
             modalImgSmall.style.visibility =
                 "visible";
@@ -6054,12 +4311,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
         }
 
-		/*
-		 * -------------------------------------------------
-		 * MEDIUM
-		 * -------------------------------------------------
-		 */
-
 		if (newStage === 1) {
 
 			if (!modalImgMedium)
@@ -6071,15 +4322,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 				if (!isModalLoadActive(loadID))
 					return;
 
-				/*
-				 * The modal's own Medium image is now
-				 * actually loaded, so naturalWidth and
-				 * naturalHeight are available.
-				 */
-
-				imgResize(
-					modalImgMedium
-				);
+				imgResize(modalImgMedium);
 
 				modalMediumLoaded =
 					true;
@@ -6090,10 +4333,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 				modalImgMedium.dataset.showingFull =
 					"false";
 
-				/*
-				 * Medium is now ready.
-				 */
-
 				modalImgMedium.style.visibility =
 					"visible";
 
@@ -6102,11 +4341,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
 				modalImgMedium.style.zIndex =
 					"3";
-
-				/*
-				 * Only now remove the temporary
-				 * thumbnail.
-				 */
 
 				if (modalImgSmall) {
 
@@ -6124,9 +4358,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
 				if (loadingTimer) {
 
-					clearTimeout(
-						loadingTimer
-					);
+					clearTimeout(loadingTimer);
 
 					loadingTimer =
 						null;
@@ -6135,9 +4367,7 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
 				if (loader) {
 
-					loader.classList.remove(
-						"active"
-					);
+					loader.classList.remove("active");
 
 				}
 
@@ -6149,20 +4379,8 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
 			};
 
-			/*
-			 * Give the modal Medium the URL.
-			 */
-
 			modalImgMedium.src =
 				url;
-
-			/*
-			 * If the browser already has the image
-			 * available synchronously, use it now.
-			 *
-			 * Otherwise wait for the modal image's
-			 * own load event.
-			 */
 
 			if (
 				modalImgMedium.complete &&
@@ -6196,12 +4414,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 		}
 
     }
-	
-	/*
-     * -------------------------------------------------
-     * MODAL-WIDE INTERACTION
-     * -------------------------------------------------
-     */
 
     modal.addEventListener(
         "wheel",
@@ -6224,12 +4436,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
     modal.addEventListener(
         "pointercancel",
         imgPanEnd);
-
-    /*
-     * -------------------------------------------------
-     * PINCH ZOOM
-     * -------------------------------------------------
-     */
 
     modal.addEventListener(
         "touchstart",
@@ -6302,15 +4508,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
     });
 
-	/*
-	 * -------------------------------------------------
-	 * FULL IMAGE LOAD = RESUME THUMBNAIL LOADING
-	 * -------------------------------------------------
-	 *
-	 * The actual Full image load event is the
-	 * authoritative signal that modal priority is done.
-	 */
-
 	if (modalImgFull) {
 
 		modalImgFull.addEventListener(
@@ -6331,11 +4528,6 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 				modalFullLoaded =
 					true;
 
-				/*
-				 * Full is actually loaded.
-				 * Resume the gallery loader now.
-				 */
-
 				resumeThumbnailLoading();
 
 			},
@@ -6347,158 +4539,95 @@ function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
 	}
 
-    /*
-	 * -------------------------------------------------
-	 * START MEDIUM / FULL LOADING
-	 * -------------------------------------------------
-	 *
-	 * The thumbnail is already visible.
-	 *
-	 * Do NOT load the thumbnail again.
-	 */
+    if (sourceItem && !sourceItem.loaded) {
+        let thumbnailURL = null;
+        try {
+            thumbnailURL = await forceLoadThumbnail(sourceItem);
+        } catch (error) {
+            console.debug("[MODAL THUMBNAIL] Asset resolution failed", {
+                index: sourceItem.index,
+                source: sourceItem.source,
+                errorName: error?.name,
+                errorMessage: error?.message
+            });
+        }
 
-	if (sourceMediumImage) {
+        if (!thumbnailURL && isModalLoadActive(loadID)) {
+            sourceItem.thumbnailFailed = true;
+            noteImageFailure();
+            console.debug("[MODAL THUMBNAIL] Failed; medium/full deferred until thumbnail succeeds", {
+                index: sourceItem.index,
+                source: sourceItem.source
+            });
+            modalRetry = {
+                name: "open",
+                loadID,
+                thumbSrc: sourceItem.source === "telegram" ? "" : getImageURLs(sourceItem.image).thumb,
+                mediumSrc: sourceItem.source === "telegram" ? "" : getImageURLs(sourceItem.image).medium,
+                fullSrc: sourceItem.source === "telegram" ? "" : getImageURLs(sourceItem.image).full,
+                slot: sourceThumb
+            };
+            return;
+        }
+    }
 
-		/*
-		 * -------------------------------------------------
-		 * MEDIUM ALREADY LOADED BY BACKGROUND LOADER
-		 * -------------------------------------------------
-		 *
-		 * Reuse the already-loaded Medium.
-		 *
-		 * Do NOT call load().
-		 *
-		 * This means:
-		 *
-		 * - no second Medium fetch()
-		 * - no second Medium loading bar
-		 * - no second Medium download
-		 *
-		 * The existing Image element from the background
-		 * loader is used as the source.
-		 */
+    if (sourceMediumImage) {
+        modalMediumLoaded = true;
+        modalMediumLoading = false;
+        modalMediumImage = sourceMediumImage;
+        display(sourceMediumImage.src, true, 1);
+        if (fullSrc)
+            load(fullSrc, "full", loadID);
+        else
+            resumeThumbnailLoading();
+    } else if (sourceItem?.image) {
+        const knownMediumItem = mediumItems.find(item => item && item.index === sourceItem.index);
+        let medium = knownMediumItem?.mediumLoaded
+            ? knownMediumItem.mediumBlobURL || knownMediumItem.src
+            : null;
+        if (!medium) {
+            try {
+                medium = await resolveImageAsset(sourceItem, "medium", () => isModalLoadActive(loadID));
+            } catch {}
+        }
+        if (medium && isModalLoadActive(loadID)) {
+            if (knownMediumItem)
+                knownMediumItem.src = medium;
+            modalMediumSrc = medium;
+            let full = null;
+            try {
+                full = await resolveImageAsset(sourceItem, "full", () => isModalLoadActive(loadID));
+            } catch {}
+            modalFullSrc = full || medium;
+            load(medium, "medium", loadID);
+        } else if (fullSrc) {
+            load(fullSrc, "full", loadID);
+        } else {
+            if (isModalLoadActive(loadID)) {
+                noteImageFailure();
+                modalRetry = {
+                    url: mediumSrc || fullSrc,
+                    name: mediumSrc ? "medium" : "full",
+                    loadID
+                };
+            }
+            resumeThumbnailLoading();
+        }
+    } else if (mediumSrc) {
+        load(mediumSrc, "medium", loadID);
+    } else if (fullSrc) {
+        load(fullSrc, "full", loadID);
+    } else {
+        resumeThumbnailLoading();
+    }
 
-		modalMediumLoaded =
-			true;
-
-		modalMediumLoading =
-			false;
-
-		modalMediumImage =
-			sourceMediumImage;
-
-		display(
-			sourceMediumImage.src,
-			true,
-			1
-		);
-
-		/*
-		 * The Medium is already loaded.
-		 *
-		 * Full still needs to load normally.
-		 */
-
-		if (fullSrc) {
-
-			load(
-				fullSrc,
-				"full",
-				loadID
-			);
-
-		} else {
-
-			/*
-			 * There is no Full image, so modal priority
-			 * is finished as soon as Medium is displayed.
-			 */
-
-			resumeThumbnailLoading();
-
-		}
-
-	} else if (mediumSrc) {
-
-		/*
-		 * -------------------------------------------------
-		 * MEDIUM NOT LOADED YET
-		 * -------------------------------------------------
-		 *
-		 * Let the modal's existing load() function handle
-		 * the Medium normally.
-		 *
-		 * This preserves:
-		 *
-		 * - fetch()
-		 * - blob URL
-		 * - Medium loading bar
-		 * - existing Medium loading behavior
-		 *
-		 * The thumbnail loader was stopped above, so the
-		 * background Medium loader cannot race this load.
-		 */
-
-		load(
-			mediumSrc,
-			"medium",
-			loadID
-		);
-
-	} else if (fullSrc) {
-
-		/*
-		 * -------------------------------------------------
-		 * NO MEDIUM EXISTS
-		 * -------------------------------------------------
-		 *
-		 * Go directly to Full.
-		 */
-
-		load(
-			fullSrc,
-			"full",
-			loadID
-		);
-
-	} else {
-
-		/*
-		 * -------------------------------------------------
-		 * NOTHING ELSE TO LOAD
-		 * -------------------------------------------------
-		 */
-
-		resumeThumbnailLoading();
-
-	}
 }
-
-function closeModal(
-	resumeGallery = true
-) {
-
-	/*
-	 * -------------------------------------------------
-	 * INVALIDATE CURRENT MODAL LOAD
-	 * -------------------------------------------------
-	 */
+function closeModal(resumeGallery = true) {
 
 	modalLoadID++;
-
-	/*
-	 * -------------------------------------------------
-	 * CANCEL MODAL NETWORK LOADS
-	 * -------------------------------------------------
-	 */
+    modalRetry = null;
 
 	cancelImageLoads();
-
-	/*
-	 * -------------------------------------------------
-	 * RELEASE MODAL LOADING STATE
-	 * -------------------------------------------------
-	 */
 
 	fullImageLoading =
 		false;
@@ -6506,48 +4635,16 @@ function closeModal(
 	modalMediumLoading =
 		false;
 
-	/*
-	 * -------------------------------------------------
-	 * RESUME NORMAL GALLERY LOADING
-	 * -------------------------------------------------
-	 *
-	 * Only resume the normal gallery queue when
-	 * requested.
-	 *
-	 * Navigation functions that are about to destroy
-	 * the current gallery can call:
-	 *
-	 *     closeModal(false);
-	 *
-	 * so the old gallery queue is not restarted just
-	 * before the gallery is replaced.
-	 *
-	 * Normal modal closing continues to use:
-	 *
-	 *     closeModal();
-	 *
-	 * which preserves the existing behavior.
-	 */
-
 	if (
 		resumeGallery
 	) {
-		console.log("close false");
 
 		thumbnailPriorityPaused =
 			false;
 
-		processThumbnailQueue(
-			thumbnailLoadSession
-		);
+		processThumbnailQueue(thumbnailLoadSession);
 
 	}
-
-	/*
-	 * -------------------------------------------------
-	 * RESET MODAL
-	 * -------------------------------------------------
-	 */
 
 	const modal =
 		document.getElementById("modal");
@@ -6615,12 +4712,6 @@ function closeModal(
 
 	}
 
-	/*
-	 * -------------------------------------------------
-	 * RESET LOADING UI
-	 * -------------------------------------------------
-	 */
-
 	const loadingBar =
 		document.getElementById(
 			"modalLoadingBar");
@@ -6643,27 +4734,14 @@ function closeModal(
 
 	}
 
-	/*
-	 * -------------------------------------------------
-	 * STOP LOADING SPINNER TIMER
-	 * -------------------------------------------------
-	 */
-
 	if (loadingTimer) {
 
-		clearTimeout(
-			loadingTimer);
+		clearTimeout(loadingTimer);
 
 		loadingTimer =
 			null;
 
 	}
-
-	/*
-	 * -------------------------------------------------
-	 * RESET TRANSFORM
-	 * -------------------------------------------------
-	 */
 
 	imgTransform = {
 		x: 0,
@@ -6712,35 +4790,19 @@ window.addEventListener("resize", () => {
     if (!img)
         return;
 
-    /*
-     * Recalculate the image's base size
-     * for the new viewport.
-     */
-
     if (img === modalImgSmall) {
 
-        resizeThumb(
-            img);
+        resizeThumb(img);
 
     } else {
 
-        imgResize(
-            img);
+        imgResize(img);
 
     }
 
-    /*
-     * Reapply the current zoom/pan.
-     */
-
     applyTransform();
 
-    /*
-     * Keep the image inside the new viewport.
-     */
-
-    constrainImage(
-        img);
+    constrainImage(img);
 
 });
 
@@ -6753,7 +4815,6 @@ let imgTransform = {
 };
 
 let imgMoved = false;
-let imgDownPos = {};
 
 initAlbums();
 
@@ -6764,8 +4825,8 @@ function clamp(v, min, max) {
 function applyTransform() {
 
     const transform =
-        `translate(-50%, -50%) ` + 
-        `translate(${imgTransform.x}px, ${imgTransform.y}px) ` + 
+        `translate(-50%, -50%) ` +
+        `translate(${imgTransform.x}px, ${imgTransform.y}px) ` +
 `scale(${imgTransform.scale})`;
 
     if (modalImgMedium) {
@@ -6785,18 +4846,6 @@ function applyTransform() {
 
     if (visibleImg) {
 
-        /*console.log(
-        "[TRANSFORM STATE]", {
-        x: imgTransform.x,
-        y: imgTransform.y,
-        scale: imgTransform.scale,
-
-        displayingFull,
-
-        stack:
-        new Error().stack
-        });*/
-
     }
 
 }
@@ -6815,12 +4864,6 @@ function getBounds(img) {
     const rect =
         img.getBoundingClientRect();
 
-    /*
-     * -------------------------------------------------
-     * IMAGE SIZE
-     * -------------------------------------------------
-     */
-
     const width =
         rect.width;
 
@@ -6832,25 +4875,6 @@ function getBounds(img) {
 
     const viewportHeight =
         window.innerHeight;
-
-    /*
-     * -------------------------------------------------
-     * NORMAL POSITION
-     * -------------------------------------------------
-     *
-     * The image is centered by:
-     *
-     * translate(-50%, -50%)
-     *
-     * so imgTransform.x/y represent movement of the
-     * image center away from the viewport center.
-     */
-
-    /*
-     * How far the image center can move before an
-     * image edge reaches the corresponding viewport
-     * edge.
-     */
 
     const halfWidth =
         width / 2;
@@ -6864,47 +4888,19 @@ function getBounds(img) {
     const halfViewportHeight =
         viewportHeight / 2;
 
-    /*
-     * -------------------------------------------------
-     * NORMAL EDGE BOUNDS
-     * -------------------------------------------------
-     *
-     * These are the normal limits for each axis.
-     *
-     * If the image is larger than the viewport,
-     * it can move until one of its edges reaches
-     * the viewport edge.
-     *
-     * If the image is smaller than the viewport,
-     * the center can move freely until its edge
-     * reaches the viewport edge.
-     */
-
     const normalX =
         halfWidth +
         halfViewportWidth
          -
-        Math.min(
-            halfWidth,
+        Math.min(halfWidth,
             halfViewportWidth);
 
     const normalY =
         halfHeight +
         halfViewportHeight
          -
-        Math.min(
-            halfHeight,
+        Math.min(halfHeight,
             halfViewportHeight);
-
-    /*
-     * -------------------------------------------------
-     * SIMPLER FORM
-     * -------------------------------------------------
-     *
-     * This is the actual maximum movement of the
-     * image center before an edge reaches an edge
-     * of the viewport.
-     */
 
     const edgeX =
         Math.abs(
@@ -6916,20 +4912,8 @@ function getBounds(img) {
             halfHeight -
             halfViewportHeight);
 
-    /*
-     * -------------------------------------------------
-     * EXTRA BOUNDARY
-     * -------------------------------------------------
-     *
-     * 1.0 = normal edge touching.
-     *
-     * 1.5 = allow half the image to extend beyond
-     * the viewport, as before.
-     */
-
     const multiplier =
-        Number.isFinite(
-            imagePanBoundaryMultiplier)
+        Number.isFinite(imagePanBoundaryMultiplier)
          ? imagePanBoundaryMultiplier
          : 1;
 
@@ -6938,10 +4922,6 @@ function getBounds(img) {
             (multiplier - 1) / 0.5,
             0,
             1);
-
-    /*
-     * Maximum possible center movement at 1.5x.
-     */
 
     const maximumX =
         halfWidth;
@@ -6969,8 +4949,7 @@ function endZoomGesture() {
 
     if (zoomEndTimer) {
 
-        clearTimeout(
-            zoomEndTimer);
+        clearTimeout(zoomEndTimer);
 
     }
 
@@ -6980,25 +4959,6 @@ function endZoomGesture() {
             zooming = false;
 
             zoomEndTimer = null;
-
-            /*
-             * IMPORTANT:
-             *
-             * Do NOT constrain or reposition the image
-             * here.
-             *
-             * imgZoom() already keeps the image inside
-             * the active pan boundary.
-             *
-             * This prevents the image from teleporting
-             * after the final wheel tick.
-             */
-
-            /*
-             * -------------------------------------------------
-             * EXISTING RESOLUTION LOGIC
-             * -------------------------------------------------
-             */
 
             if (!autoResolutionSwitch)
                 return;
@@ -7039,8 +4999,7 @@ function endZoomGesture() {
 
                 if (fullSwitchTimer) {
 
-                    clearTimeout(
-                        fullSwitchTimer);
+                    clearTimeout(fullSwitchTimer);
 
                     fullSwitchTimer =
                         null;
@@ -7099,12 +5058,6 @@ function imgZoom(e) {
 
     e.preventDefault();
 
-    /*
-     * -------------------------------------------------
-     * CURRENT IMAGE
-     * -------------------------------------------------
-     */
-
     const img =
         displayingFull
          ? modalImgFull
@@ -7112,12 +5065,6 @@ function imgZoom(e) {
 
     if (!img)
         return;
-
-    /*
-     * -------------------------------------------------
-     * CURRENT SCALE
-     * -------------------------------------------------
-     */
 
     const oldScale =
         Number.isFinite(imgTransform.scale)
@@ -7129,23 +5076,8 @@ function imgZoom(e) {
          ? 1
          : -1;
 
-    /*
-     * -------------------------------------------------
-     * CURRENT IMAGE RECT
-     * -------------------------------------------------
-     */
-
     const rect =
         img.getBoundingClientRect();
-
-    /*
-     * -------------------------------------------------
-     * UN-SCALED IMAGE SIZE
-     * -------------------------------------------------
-     *
-     * rect includes the current transform scale.
-     * Remove that scale to get the actual image size.
-     */
 
     const unscaledWidth =
         rect.width /
@@ -7154,27 +5086,6 @@ function imgZoom(e) {
     const unscaledHeight =
         rect.height /
         oldScale;
-
-    /*
-     * -------------------------------------------------
-     * DYNAMIC FIRST ZOOM LEVEL
-     * -------------------------------------------------
-     *
-     * This is the scale at which the image's SHORT
-     * axis first reaches the corresponding viewport
-     * edge.
-     *
-     * Example:
-     *
-     * Landscape image:
-     *     height reaches viewport height.
-     *
-     * Portrait image:
-     *     width reaches viewport width.
-     *
-     * At this scale the image is guaranteed to fill
-     * at least one entire viewport axis.
-     */
 
     const widthScale =
         window.innerWidth /
@@ -7185,47 +5096,21 @@ function imgZoom(e) {
         unscaledHeight;
 
     const firstZoomScale =
-        Math.max(
-            widthScale,
+        Math.max(widthScale,
             heightScale);
 
-    /*
-     * -------------------------------------------------
-     * CALCULATE NEW ZOOM
-     * -------------------------------------------------
-     */
-
     let newScale;
-
-    /*
-     * -------------------------------------------------
-     * FIRST UPWARD ZOOM TICK
-     * -------------------------------------------------
-     *
-     * If the image is currently below the dynamic
-     * first-zoom level, jump directly to that level.
-     *
-     * This applies even if we are NOT exactly at
-     * minZoom.
-     */
 
     if (
         direction > 0 &&
         oldScale < firstZoomScale) {
 
         newScale =
-            clamp(
-                firstZoomScale,
+            clamp(firstZoomScale,
                 minZoom,
                 maxZoom);
 
     } else {
-
-        /*
-         * -------------------------------------------------
-         * NORMAL ZOOM
-         * -------------------------------------------------
-         */
 
         newScale =
             clamp(
@@ -7236,18 +5121,8 @@ function imgZoom(e) {
 
     }
 
-    /*
-     * Nothing changed.
-     */
-
     if (newScale === oldScale)
         return;
-
-    /*
-     * -------------------------------------------------
-     * CURRENT IMAGE CENTER
-     * -------------------------------------------------
-     */
 
     const imageCenterX =
         rect.left +
@@ -7257,12 +5132,6 @@ function imgZoom(e) {
         rect.top +
         rect.height / 2;
 
-    /*
-     * -------------------------------------------------
-     * MOUSE OFFSET FROM IMAGE CENTER
-     * -------------------------------------------------
-     */
-
     const mouseOffsetX =
         e.clientX -
         imageCenterX;
@@ -7270,12 +5139,6 @@ function imgZoom(e) {
     const mouseOffsetY =
         e.clientY -
         imageCenterY;
-
-    /*
-     * -------------------------------------------------
-     * SCALE AROUND MOUSE
-     * -------------------------------------------------
-     */
 
     const ratio =
         newScale /
@@ -7295,12 +5158,6 @@ function imgZoom(e) {
         e.clientY -
         mouseOffsetY * ratio;
 
-    /*
-     * -------------------------------------------------
-     * CONVERT CENTER TO TRANSFORM POSITION
-     * -------------------------------------------------
-     */
-
     let newX =
         newCenterX -
         viewportCenterX;
@@ -7309,12 +5166,6 @@ function imgZoom(e) {
         newCenterY -
         viewportCenterY;
 
-    /*
-     * -------------------------------------------------
-     * IMAGE SIZE AT NEW SCALE
-     * -------------------------------------------------
-     */
-
     const newWidth =
         unscaledWidth *
         newScale;
@@ -7322,12 +5173,6 @@ function imgZoom(e) {
     const newHeight =
         unscaledHeight *
         newScale;
-
-    /*
-     * -------------------------------------------------
-     * PAN BOUNDARY
-     * -------------------------------------------------
-     */
 
     const halfWidth =
         newWidth / 2;
@@ -7341,15 +5186,6 @@ function imgZoom(e) {
     const halfViewportHeight =
         window.innerHeight / 2;
 
-    /*
-     * -------------------------------------------------
-     * NORMAL EDGE BOUNDS
-     * -------------------------------------------------
-     *
-     * ABS allows an image smaller than the viewport
-     * to move until its own edge touches the viewport.
-     */
-
     const edgeX =
         Math.abs(
             halfWidth -
@@ -7360,12 +5196,6 @@ function imgZoom(e) {
             halfHeight -
             halfViewportHeight);
 
-    /*
-     * -------------------------------------------------
-     * EXTENDED BOUNDARY
-     * -------------------------------------------------
-     */
-
     const maximumX =
         halfWidth;
 
@@ -7373,8 +5203,7 @@ function imgZoom(e) {
         halfHeight;
 
     const multiplier =
-        Number.isFinite(
-            imagePanBoundaryMultiplier)
+        Number.isFinite(imagePanBoundaryMultiplier)
          ? imagePanBoundaryMultiplier
          : 1;
 
@@ -7383,12 +5212,6 @@ function imgZoom(e) {
             (multiplier - 1) / 0.5,
             0,
             1);
-
-    /*
-     * -------------------------------------------------
-     * FINAL BOUNDS
-     * -------------------------------------------------
-     */
 
     const boundsX =
         edgeX +
@@ -7399,12 +5222,6 @@ function imgZoom(e) {
         edgeY +
         (maximumY - edgeY) *
         boundaryAmount;
-
-    /*
-     * -------------------------------------------------
-     * CONSTRAIN ZOOM TARGET
-     * -------------------------------------------------
-     */
 
     newX =
         clamp(
@@ -7417,12 +5234,6 @@ function imgZoom(e) {
             newY,
             -boundsY,
             boundsY);
-
-    /*
-     * -------------------------------------------------
-     * STORE TRANSFORM
-     * -------------------------------------------------
-     */
 
     imgTransform.x =
         Number.isFinite(newX)
@@ -7437,27 +5248,6 @@ function imgZoom(e) {
     imgTransform.scale =
         newScale;
 
-    /*
-     * -------------------------------------------------
-     * CENTER RETURN
-     * -------------------------------------------------
-     *
-     * IMPORTANT:
-     *
-     * This is NO LONGER based on a percentage of
-     * minZoom.
-     *
-     * Instead, the dynamic firstZoomScale is the
-     * boundary.
-     *
-     * If the image is below the level where its
-     * short axis fills the viewport, start/maintain
-     * the 3-second center-return countdown.
-     *
-     * Once it reaches the first-zoom level or higher,
-     * cancel the return.
-     */
-
     if (
         newScale <
         firstZoomScale) {
@@ -7470,12 +5260,6 @@ function imgZoom(e) {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * APPLY TRANSFORM
-     * -------------------------------------------------
-     */
-
     applyTransform();
 
     if (
@@ -7486,20 +5270,8 @@ function imgZoom(e) {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * MANUAL FULL OVERRIDES EVERYTHING
-     * -------------------------------------------------
-     */
-
     if (manualFullEnabled)
         return;
-
-    /*
-     * =================================================
-     * AUTO RESOLUTION
-     * =================================================
-     */
 
     if (autoResolutionSwitch) {
 
@@ -7509,8 +5281,7 @@ function imgZoom(e) {
 
             if (fullSwitchTimer) {
 
-                clearTimeout(
-                    fullSwitchTimer);
+                clearTimeout(fullSwitchTimer);
 
                 fullSwitchTimer =
                     null;
@@ -7535,8 +5306,7 @@ function imgZoom(e) {
 
                 if (fullSwitchTimer) {
 
-                    clearTimeout(
-                        fullSwitchTimer);
+                    clearTimeout(fullSwitchTimer);
 
                     fullSwitchTimer =
                         null;
@@ -7577,12 +5347,6 @@ function imgZoom(e) {
 
     }
 
-    /*
-     * =================================================
-     * ZOOM PERFORMANCE SWITCH
-     * =================================================
-     */
-
     if (
         resolutionSwitchOnZoom &&
         autoResolutionSwitch &&
@@ -7592,8 +5356,7 @@ function imgZoom(e) {
 
         if (fullSwitchTimer) {
 
-            clearTimeout(
-                fullSwitchTimer);
+            clearTimeout(fullSwitchTimer);
 
             fullSwitchTimer =
                 null;
@@ -7607,12 +5370,6 @@ function imgZoom(e) {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * DETECT END OF ZOOM GESTURE
-     * -------------------------------------------------
-     */
-
     if (
         typeof endZoomGesture ===
         "function") {
@@ -7624,20 +5381,9 @@ function imgZoom(e) {
 }
 
 function imgPan(e) {
-/*console.log(
-"[PAN DEBUG] pointerdown", {
-imgDragging,
-interactingWithImage,
-displayingFull,
-scale: imgTransform.scale
-});*/
 
 if (e.button !== 0)
     return;
-
-/*
- * Don't start a pan on UI controls.
- */
 
 if (
     e.target.closest &&
@@ -7651,50 +5397,23 @@ if (
 
 e.preventDefault();
 
-/*
- * -------------------------------------------------
- * Remember the resolution at the START of the pan.
- * -------------------------------------------------
- *
- * This is important.
- *
- * Don't use displayingFull later to determine
- * whether this particular pan started in Full.
- */
-
 const startedInFull =
     displayingFull &&
     !manualFullEnabled &&
     fullImageLoaded &&
     modalMediumLoaded;
 
-/*
- * Only treat this as a temporary Full -> Medium
- * pan switch when resolutionSwitchOnPan is enabled.
- */
-
 panStartedInFull =
     startedInFull &&
     resolutionSwitchOnPan;
 
-/*
- * -------------------------------------------------
- * Cancel pending Full restore.
- * -------------------------------------------------
- */
-
 if (fullSwitchTimer) {
 
-    clearTimeout(
-        fullSwitchTimer);
+    clearTimeout(fullSwitchTimer);
 
     fullSwitchTimer = null;
 
 }
-
-/*
- * Get the image BEFORE switching resolution.
- */
 
 const img =
     displayingFull
@@ -7704,15 +5423,6 @@ const img =
 if (!img)
     return;
 
-/*
- * -------------------------------------------------
- * FULL -> MEDIUM FOR PAN
- * -------------------------------------------------
- *
- * Only do this when resolutionSwitchOnPan is
- * actually enabled.
- */
-
 if (
     startedInFull &&
     resolutionSwitchOnPan) {
@@ -7721,12 +5431,6 @@ if (
 
 }
 
-/*
- * Get the image AFTER the resolution switch.
- *
- * Pan should now operate on Medium.
- */
-
 const panImg =
     displayingFull
      ? modalImgFull
@@ -7734,11 +5438,6 @@ const panImg =
 
 if (!panImg)
     return;
-
-/*
- * Cancel any pending or active return-to-center
- * animation as soon as the user starts panning.
- */
 
 cancelCenterReturn();
 
@@ -7799,10 +5498,6 @@ function panImage(e) {
 
     }
 
-    /*
-     * Use the SAME boundary system as zooming.
-     */
-
     const bounds =
         getBounds(img);
 
@@ -7823,11 +5518,6 @@ function panImage(e) {
 }
 
 function imgPanEnd(e) {
-    /*console.log(
-    "[PAN DEBUG] pointerup", {
-    imgDragging,
-    interactingWithImage
-    });*/
 
     if (!imgDragging)
         return;
@@ -7851,12 +5541,6 @@ function imgPanEnd(e) {
 
     } catch {}
 
-    /*
-     * -------------------------------------------------
-     * CLICK WITHOUT MOVEMENT
-     * -------------------------------------------------
-     */
-
     if (!imgMoved) {
 
         dragStart =
@@ -7874,33 +5558,10 @@ function imgPanEnd(e) {
     dragStart =
         null;
 
-    /*
-     * -------------------------------------------------
-     * CURRENT AUTO RESOLUTION STATE
-     * -------------------------------------------------
-     *
-     * IMPORTANT:
-     *
-     * resolutionSwitchOnZoom is NOT allowed to make
-     * Medium -> Full.
-     *
-     * Only Auto Resolution can determine whether Full
-     * is appropriate.
-     */
-
     const autoWantsFull =
         autoResolutionSwitch &&
         imgTransform.scale >=
         fullSwitchZoom;
-
-    /*
-     * -------------------------------------------------
-     * PAN STARTED IN FULL
-     * -------------------------------------------------
-     *
-     * Full was temporarily changed to Medium when
-     * the pan began.
-     */
 
     if (
         panStartedInFull &&
@@ -7909,28 +5570,15 @@ function imgPanEnd(e) {
         fullImageLoaded &&
         modalMediumLoaded) {
 
-        /*
-         * Only restore Full if Auto Resolution is
-         * currently requesting Full.
-         */
-
         if (autoWantsFull) {
 
             scheduleFullRestore();
 
         } else {
 
-            /*
-             * Current zoom no longer qualifies for
-             * Auto Full.
-             *
-             * Stay Medium.
-             */
-
             if (fullSwitchTimer) {
 
-                clearTimeout(
-                    fullSwitchTimer);
+                clearTimeout(fullSwitchTimer);
 
                 fullSwitchTimer =
                     null;
@@ -7941,17 +5589,6 @@ function imgPanEnd(e) {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * PAN STARTED IN MEDIUM
-     * -------------------------------------------------
-     *
-     * If the user started panning in Medium and
-     * crossed the Auto threshold during the pan,
-     * Auto may promote to Full.
-     *
-     * resolutionSwitchOnZoom does NOT participate.
-     */
     else if (
         !panStartedInFull &&
         !manualFullEnabled &&
@@ -7962,8 +5599,7 @@ function imgPanEnd(e) {
 
             if (fullSwitchTimer) {
 
-                clearTimeout(
-                    fullSwitchTimer);
+                clearTimeout(fullSwitchTimer);
 
                 fullSwitchTimer =
                     null;
@@ -7985,30 +5621,17 @@ function scheduleFullRestore() {
 
     if (fullSwitchTimer) {
 
-        clearTimeout(
-            fullSwitchTimer);
+        clearTimeout(fullSwitchTimer);
 
         fullSwitchTimer = null;
 
     }
 
-    /*
-     * Manual Full always wins.
-     */
-
     if (manualFullEnabled)
         return;
 
-    /*
-     * Pan switching must be enabled.
-     */
-
     if (!resolutionSwitchOnPan)
         return;
-
-    /*
-     * Need both resolutions ready.
-     */
 
     if (
         !fullImageLoaded ||
@@ -8023,11 +5646,6 @@ function scheduleFullRestore() {
 
             fullSwitchTimer = null;
 
-            /*
-             * Anything that invalidates the restore
-             * cancels it.
-             */
-
             if (
                 manualFullEnabled ||
                 !fullImageLoaded ||
@@ -8040,16 +5658,6 @@ function scheduleFullRestore() {
 
             }
 
-            /*
-             * Restore Full because THIS pan started
-             * while Full was displayed.
-             *
-             * Do NOT check fullSwitchZoom here.
-             *
-             * resolutionSwitchOnPan is deliberately
-             * independent of the zoom threshold.
-             */
-
             switchToFull();
 
         }, resolutionSwitchDelay);
@@ -8058,18 +5666,8 @@ function scheduleFullRestore() {
 
 function enforceAutoResolution() {
 
-    /*
-     * Manual Full always wins.
-     */
-
     if (manualFullEnabled)
         return;
-
-    /*
-     * Auto Resolution is disabled.
-     *
-     * Therefore Auto must NEVER change resolution.
-     */
 
     if (
         !autoResolutionSwitch ||
@@ -8079,20 +5677,13 @@ function enforceAutoResolution() {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * BELOW AUTO THRESHOLD
-     * -------------------------------------------------
-     */
-
     if (
         imgTransform.scale <
         fullSwitchZoom) {
 
         if (fullSwitchTimer) {
 
-            clearTimeout(
-                fullSwitchTimer);
+            clearTimeout(fullSwitchTimer);
 
             fullSwitchTimer =
                 null;
@@ -8111,12 +5702,6 @@ function enforceAutoResolution() {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * AT / ABOVE AUTO THRESHOLD
-     * -------------------------------------------------
-     */
-
     if (
         imgTransform.scale >=
         fullSwitchZoom &&
@@ -8126,8 +5711,7 @@ function enforceAutoResolution() {
 
         if (fullSwitchTimer) {
 
-            clearTimeout(
-                fullSwitchTimer);
+            clearTimeout(fullSwitchTimer);
 
             fullSwitchTimer =
                 null;
@@ -8167,11 +5751,6 @@ function enforceAutoResolution() {
 }
 
 function switchToFull() {
-    /*
-     * -------------------------------------------------
-     * BASIC VALIDATION
-     * -------------------------------------------------
-     */
 
     if (
         !modalImgMedium ||
@@ -8181,17 +5760,10 @@ function switchToFull() {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * FULL NOT READY
-     * -------------------------------------------------
-     */
-
     if (!fullImageLoaded) {
         if (loadingTimer) {
 
-            clearTimeout(
-                loadingTimer);
+            clearTimeout(loadingTimer);
 
             loadingTimer =
                 null;
@@ -8210,19 +5782,9 @@ function switchToFull() {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * FULL IS READY
-     * -------------------------------------------------
-     */
-    /*
-     * Stop loading UI.
-     */
-
     if (loadingTimer) {
 
-        clearTimeout(
-            loadingTimer);
+        clearTimeout(loadingTimer);
 
         loadingTimer =
             null;
@@ -8238,15 +5800,6 @@ function switchToFull() {
             "0";
 
     }
-
-    /*
-     * -------------------------------------------------
-     * MATCH MEDIUM'S PHYSICAL SIZE
-     * -------------------------------------------------
-     *
-     * The Full image uses the exact same displayed
-     * dimensions as Medium.
-     */
 
     modalImgFull.style.width =
         modalImgMedium.style.width;
@@ -8266,33 +5819,9 @@ function switchToFull() {
     modalImgFull.style.filter =
         "none";
 
-    /*
-     * -------------------------------------------------
-     * APPLY CURRENT TRANSFORM BEFORE SWITCH
-     * -------------------------------------------------
-     */
-
     applyTransform();
 
-    /*
-     * Force the browser to resolve the Full image's
-     * dimensions before making it visible.
-     */
-
     void modalImgFull.offsetWidth;
-
-    /*
-     * -------------------------------------------------
-     * SWITCH IMAGES
-     * -------------------------------------------------
-     *
-     * IMPORTANT:
-     *
-     * Set displayingFull BEFORE revealing Full.
-     *
-     * This prevents another event from seeing the
-     * old state during the transition.
-     */
 
     displayingFull =
         true;
@@ -8303,29 +5832,17 @@ function switchToFull() {
     modalImgMedium.dataset.showingFull =
         "false";
 
-    /*
-     * Full first.
-     */
-
     modalImgFull.style.visibility =
         "visible";
 
     modalImgFull.style.zIndex =
         "3";
 
-    /*
-     * Medium second.
-     */
-
     modalImgMedium.style.visibility =
         "hidden";
 
     modalImgMedium.style.opacity =
         "1";
-
-    /*
-     * Reapply the transform after the state change.
-     */
 
     applyTransform();
 }
@@ -8334,10 +5851,6 @@ function switchToMedium() {
     if (!modalImgMedium) {
         return;
     }
-
-    /*
-     * Match Medium's physical dimensions to Full.
-     */
 
     if (modalImgFull) {
 
@@ -8531,8 +6044,7 @@ function showZoomLevel() {
 
     if (zoomLevelTimer) {
 
-        clearTimeout(
-            zoomLevelTimer);
+        clearTimeout(zoomLevelTimer);
 
     }
 
@@ -8557,17 +6069,6 @@ function showImage(offset) {
         return;
     }
 
-    /*
-     * -------------------------------------------------
-     * FIND THE NEXT VALID / VISIBLE IMAGE
-     * -------------------------------------------------
-     *
-     * Navigate using currentAlbum.images rather than
-     * rebuilding the order from the DOM.
-     *
-     * This keeps currentImageIndex authoritative.
-     */
-
     const total =
         currentAlbum.images.length;
 
@@ -8577,10 +6078,6 @@ function showImage(offset) {
     for (let i = 0; i < total; i++) {
 
         index += offset;
-
-        /*
-         * Loop around.
-         */
 
         if (index >= total) {
             index = 0;
@@ -8593,32 +6090,32 @@ function showImage(offset) {
         const img =
             currentAlbum.images[index];
 
-        if (
-            !img ||
-            !img.thumb?.url ||
-            !img.image?.url
-        ) {
+        if (!img) {
             continue;
         }
 
-        /*
-         * -------------------------------------------------
-         * CHECK WHETHER THIS IMAGE IS FILTERED OUT
-         * -------------------------------------------------
-         */
+        const isTelegramImage =
+            img.source === "telegram";
+
+        if (isTelegramImage) {
+
+            if (!img.telegramFileID) {
+                continue;
+            }
+
+        }
+        else {
+
+            const urls = getImageURLs(img);
+
+            if (!urls.thumb) {
+                continue;
+            }
+
+        }
 
         const thumb =
-            document.querySelector(
-                `.thumb[data-index="${index}"]`
-            );
-
-        /*
-         * If the thumbnail exists and is hidden by the
-         * tag filter, skip it.
-         *
-         * If it doesn't exist in the DOM, still allow the
-         * image because the album data itself is valid.
-         */
+            document.querySelector(`.thumbnail-slot[data-index="${index}"]`);
 
         if (
             thumb &&
@@ -8627,53 +6124,17 @@ function showImage(offset) {
             continue;
         }
 
-        /*
-         * Found the next valid image.
-         */
-
         currentImageIndex =
             index;
 
-        /*
-         * -------------------------------------------------
-         * IMAGE SOURCES
-         * -------------------------------------------------
-         */
+        const urls = getImageURLs(img);
+        const thumbSrc = isTelegramImage ? "" : urls.thumb;
+        const mediumSrc = isTelegramImage ? "" : urls.medium;
+        const fullSrc = isTelegramImage ? "" : urls.full;
 
-        const thumbSrc =
-            img.thumb?.url ||
-            "";
-
-        const mediumSrc =
-            img.medium?.url ||
-            img.image?.url ||
-            "";
-
-        const fullSrc =
-            img.image?.url ||
-            "";
-
-        /*
-         * -------------------------------------------------
-         * REUSE THE EXISTING GALLERY THUMBNAIL
-         * -------------------------------------------------
-         */
-
-        openModal(
-            thumbSrc,
-            mediumSrc,
-            fullSrc,
-            thumb
-        );
-
-        /*
-         * Keep the gallery thumbnail positioned around
-         * the current image.
-         */
-
-        scrollToCurrentThumbnail(
-            index
-        );
+        scrollToCurrentThumbnail(index);
+        scheduleThumbnailVisibilityCheck();
+        openModal(thumbSrc, mediumSrc, fullSrc, thumb);
 
         return;
     }
@@ -8756,8 +6217,6 @@ document.addEventListener("touchmove", e => {
         touchTimer = null;
     }
 
-    // If the user is holding or dragging,
-    // don't allow swipe detection
     if (touchIsLong)
         return;
 
@@ -8777,13 +6236,11 @@ document.addEventListener("touchend", e => {
         touchTimer = null;
     }
 
-    // Held long enough = let image dragging handle it
     if (touchIsLong)
         return;
 
     const elapsed = Date.now() - touchStartTime;
 
-    // Extra safety: ignore slow touches
     if (elapsed > 300)
         return;
 
@@ -8793,11 +6250,9 @@ document.addEventListener("touchend", e => {
     const diffX = touchEndX - touchStartX;
     const diffY = touchEndY - touchStartY;
 
-    // Ignore vertical swipes
     if (Math.abs(diffY) > Math.abs(diffX))
         return;
 
-    // Minimum swipe distance
     if (Math.abs(diffX) < 50)
         return;
 
@@ -8814,7 +6269,7 @@ document.addEventListener("touchend", e => {
 function scrollToCurrentThumbnail(index) {
 
     const thumb = document.querySelector(
-`.thumb[data-index="${index}"]`);
+`.thumbnail-slot[data-index="${index}"]`);
 
     if (!thumb)
         return;
@@ -8854,15 +6309,6 @@ function cancelImageLoads() {
 }
 
 window.addEventListener("popstate", async () => {
-        /*
-         * -------------------------------------------------
-         * LEAVING TEMPORARY ALBUM
-         * -------------------------------------------------
-         *
-         * If the current page is a temporary album and
-         * browser navigation is taking us somewhere else,
-         * remove its temporary storage.
-         */
 
         const previousTemporaryID =
             currentTemporaryAlbumID;
@@ -8875,12 +6321,6 @@ window.addEventListener("popstate", async () => {
                 location.search.substring(1)
             );
 
-        /*
-         * -------------------------------------------------
-         * HOME
-         * -------------------------------------------------
-         */
-
         if (
             !query
         ) {
@@ -8889,9 +6329,7 @@ window.addEventListener("popstate", async () => {
                 previousTemporaryID
             ) {
 
-                deleteTemporaryAlbum(
-                    previousTemporaryID
-                );
+                deleteTemporaryAlbum(previousTemporaryID);
 
             }
 
@@ -8903,12 +6341,6 @@ window.addEventListener("popstate", async () => {
 
         }
 
-        /*
-         * -------------------------------------------------
-         * SAVED / MANUAL ALBUM
-         * -------------------------------------------------
-         */
-
         if (
             query.startsWith("$")
         ) {
@@ -8917,9 +6349,7 @@ window.addEventListener("popstate", async () => {
                 previousTemporaryID
             ) {
 
-                deleteTemporaryAlbum(
-                    previousTemporaryID
-                );
+                deleteTemporaryAlbum(previousTemporaryID);
 
             }
 
@@ -8940,9 +6370,7 @@ window.addEventListener("popstate", async () => {
 
                 closeModal();
 
-                loadAlbumFromURL(
-                    album
-                );
+                loadAlbum(album, false);
 
                 return;
 
@@ -8954,15 +6382,6 @@ window.addEventListener("popstate", async () => {
 
         }
 
-        /*
-         * -------------------------------------------------
-         * TEMPORARY ALBUM
-         * -------------------------------------------------
-         *
-         * Normally this will only happen if the user
-         * navigates forward to one.
-         */
-
         if (
             query.startsWith("=")
         ) {
@@ -8971,9 +6390,7 @@ window.addEventListener("popstate", async () => {
                 query.substring(1);
 
             const album =
-                getTemporaryAlbum(
-                    albumID
-                );
+                getTemporaryAlbum(albumID);
 
             if (
                 album
@@ -8984,9 +6401,7 @@ window.addEventListener("popstate", async () => {
 
                 closeModal();
 
-                loadAlbumFromURL(
-                    album
-                );
+                loadAlbum(album, false);
 
                 return;
 
@@ -8998,32 +6413,20 @@ window.addEventListener("popstate", async () => {
 
         }
 
-        /*
-         * -------------------------------------------------
-         * IMGBB QUERY
-         * -------------------------------------------------
-         */
-
         if (
             previousTemporaryID
         ) {
 
-            deleteTemporaryAlbum(
-                previousTemporaryID
-            );
+            deleteTemporaryAlbum(previousTemporaryID);
 
         }
 
         const albumQuery =
-            createQueryAlbum(
-                query
-            );
+            createQueryAlbum(query);
 
         closeModal();
 
-        loadAlbumFromURL(
-            albumQuery
-        );
+        loadAlbum(albumQuery, false);
 
     }
 );
@@ -9045,14 +6448,6 @@ document.getElementById("filterMode").onclick = function () {
 };
 
 function applyTagFilter() {
-
-    /*
-     * -------------------------------------------------
-     * HOMEPAGE
-     * -------------------------------------------------
-     *
-     * Homepage cards are still .album elements.
-     */
 
     if (!currentAlbum) {
 
@@ -9122,21 +6517,8 @@ function applyTagFilter() {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * ALBUM
-     * -------------------------------------------------
-     *
-     * The thumbnail-slot is now the gallery item.
-     *
-     * Do NOT filter .thumb directly because both the
-     * thumbnail and Medium images are .thumb elements.
-     */
-
     const slots =
-        document.querySelectorAll(
-            ".thumbnail-slot"
-        );
+        document.querySelectorAll(".thumbnail-slot");
 
     slots.forEach(slot => {
 
@@ -9147,10 +6529,6 @@ function applyTagFilter() {
             item && item.tags
                 ? item.tags
                 : [];
-
-        /*
-         * Exclusions always apply first.
-         */
 
         const excluded =
             [...excludedTags].some(
@@ -9166,10 +6544,6 @@ function applyTagFilter() {
             return;
 
         }
-
-        /*
-         * No inclusion filters active.
-         */
 
         if (!selectedTags.size) {
 
@@ -9211,21 +6585,9 @@ function applyTagFilter() {
 
 }
 
-/*
-=========================================================
-GALLERY SETTINGS
-=========================================================
- */
-
 function updateGalleryLayout(animate = true) {
     applyGalleryLayout(animate);
 }
-
-/*
-=========================================================
-CALCULATE HOW MANY COLUMNS FIT
-=========================================================
- */
 
 function getGalleryColumnCount(
     width,
@@ -9244,44 +6606,17 @@ function getGalleryColumnCount(
 
     return Math.max(
         minColumnsToUse,
-        Math.min(
-            maxColumnsToUse,
+        Math.min(maxColumnsToUse,
             columns));
 }
-
-/*
-=========================================================
-CALCULATE TARGET LAYOUT
-=========================================================
- */
 
 function calculateGalleryLayout() {
 
     const gallery =
         document.getElementById("gallery");
 
-    /*
-     * Determine whether we're on the homepage
-     * or inside an album.
-     */
-
     const isHomePage =
         !currentAlbum;
-
-    /*
-     * -------------------------------------------------
-     * GET ACTUAL GALLERY ITEMS
-     * -------------------------------------------------
-     *
-     * Homepage:
-     *     .album
-     *
-     * Album:
-     *     .thumbnail-slot
-     *
-     * The individual thumbnail/Medium <img> elements
-     * are NOT layout items.
-     */
 
     const items =
         isHomePage
@@ -9290,20 +6625,14 @@ function calculateGalleryLayout() {
             ...gallery.querySelectorAll(".album")
         ].filter(
             element =>
-                getComputedStyle(
-                    element
-                ).display !== "none"
+                getComputedStyle(element).display !== "none"
         )
 
         : [
-            ...gallery.querySelectorAll(
-                ".thumbnail-slot"
-            )
+            ...gallery.querySelectorAll(".thumbnail-slot")
         ].filter(
             element =>
-                getComputedStyle(
-                    element
-                ).display !== "none"
+                getComputedStyle(element).display !== "none"
         );
 
     const minColumnsToUse =
@@ -9322,33 +6651,19 @@ function calculateGalleryLayout() {
         : minThumbWidth;
 
     const style =
-        getComputedStyle(
-            gallery
-        );
+        getComputedStyle(gallery);
 
     const paddingLeft =
-        parseFloat(
-            style.paddingLeft
-        ) || 0;
+        parseFloat(style.paddingLeft) || 0;
 
     const paddingRight =
-        parseFloat(
-            style.paddingRight
-        ) || 0;
+        parseFloat(style.paddingRight) || 0;
 
     const paddingTop =
-        parseFloat(
-            style.paddingTop
-        ) || 0;
+        parseFloat(style.paddingTop) || 0;
 
     const paddingBottom =
-        parseFloat(
-            style.paddingBottom
-        ) || 0;
-
-    /*
-     * Width available INSIDE the padding.
-     */
+        parseFloat(style.paddingBottom) || 0;
 
     const galleryRect =
         gallery.getBoundingClientRect();
@@ -9359,12 +6674,10 @@ function calculateGalleryLayout() {
         paddingRight;
 
     const columns =
-        getGalleryColumnCount(
-            galleryWidth,
+        getGalleryColumnCount(galleryWidth,
             minColumnsToUse,
             maxColumnsToUse,
-            minWidthToUse
-        );
+            minWidthToUse);
 
     const gap =
         window.innerWidth *
@@ -9445,10 +6758,6 @@ function calculateGalleryLayout() {
         )
         : 0;
 
-    /*
-     * Height of the actual image/card area.
-     */
-
     const imageAreaHeight =
         rows > 0
 
@@ -9462,10 +6771,6 @@ function calculateGalleryLayout() {
         )
 
         : 0;
-
-    /*
-     * Include BOTH top and bottom padding.
-     */
 
     const requiredHeight =
         paddingTop +
@@ -9484,12 +6789,6 @@ function calculateGalleryLayout() {
     };
 
 }
-
-/*
-=========================================================
-APPLY GALLERY LAYOUT
-=========================================================
- */
 
 function applyGalleryLayout(animate = true) {
 
@@ -9557,22 +6856,16 @@ tagToggle.addEventListener("click", () => {
         const elapsed =
             time - startTime;
 
-        /*
-         * Keep recalculating while the tag bar
-         * is animating.
-         */
         applyGalleryLayout(true);
 
         if (elapsed < 500) {
 
-            requestAnimationFrame(
-                animateTagGallery);
+            requestAnimationFrame(animateTagGallery);
 
         }
     }
 
-    requestAnimationFrame(
-        animateTagGallery);
+    requestAnimationFrame(animateTagGallery);
 
 });
 
@@ -9601,10 +6894,6 @@ function startGalleryResizeTracking() {
         const width =
             gallery.getBoundingClientRect().width;
 
-        /*
-         * Check whether the actual gallery width
-         * has stopped changing.
-         */
         if (
             lastMeasuredGalleryWidth !== null &&
             Math.abs(
@@ -9621,15 +6910,8 @@ function startGalleryResizeTracking() {
 
         lastMeasuredGalleryWidth = width;
 
-        /*
-         * Recalculate the layout.
-         */
         updateGalleryLayout();
 
-        /*
-         * Stop checking once the gallery has
-         * remained stable for several checks.
-         */
         if (stableChecks >= 3) {
 
             clearInterval(galleryResizeCheck);
@@ -9642,10 +6924,6 @@ function startGalleryResizeTracking() {
 
 window.addEventListener("resize", () => {
 
-    /*
-     * Restart the 50ms checking period whenever
-     * another resize event occurs.
-     */
     startGalleryResizeTracking();
 
 });
@@ -9654,11 +6932,7 @@ function buildTagList(tags) {
     const tagContainer = document.getElementById("tagList");
 
     tagContainer.innerHTML = "";
-    //console.log("buildTagList()");
-    //console.log("length:", currentAlbum.tags.length);
-    //console.log([...tagList]);
-    //console.log(currentAlbum.tags.length);
-    //currentAlbum.tags.sort().forEach((tag)=>{console.log(tag)})
+
     tags
     .sort((a, b) => a.localeCompare(b))
     .forEach(tag => {
@@ -9670,7 +6944,6 @@ function buildTagList(tags) {
 
         btn.onclick = () => {
 
-            // If it was excluded, remove exclusion first
             if (excludedTags.has(tag)) {
 
                 excludedTags.delete(tag);
@@ -9678,7 +6951,6 @@ function buildTagList(tags) {
 
             }
 
-            // Toggle normal selection
             if (selectedTags.has(tag)) {
 
                 selectedTags.delete(tag);
@@ -9702,10 +6974,6 @@ function buildTagList(tags) {
 
         btn.oncontextmenu = (e) => {
 
-            //e.preventDefault();
-
-
-            // Remove normal selection if present
             if (selectedTags.has(tag)) {
 
                 selectedTags.delete(tag);
@@ -9713,7 +6981,6 @@ function buildTagList(tags) {
 
             }
 
-            // Toggle exclusion
             if (excludedTags.has(tag)) {
 
                 excludedTags.delete(tag);
@@ -9979,8 +7246,6 @@ function removeTagAt(index) {
         return;
     }
 
-    // Find the character position where this
-    // tag begins.
     let start = 0;
 
     for (let i = 0; i < index; i++) {
@@ -10000,8 +7265,7 @@ function removeTagAt(index) {
             start,
             searchInput.value.length);
 
-    searchInput.setSelectionRange(
-        newPosition,
+    searchInput.setSelectionRange(newPosition,
         newPosition);
 }
 
@@ -10031,17 +7295,9 @@ function removeCurrentPartialTag() {
 
     const value = searchInput.value;
 
-    /*
-     * If the input already ends with ", ",
-     * there is no partial tag.
-     */
     if (value.endsWith(", "))
         return;
 
-    /*
-     * Find which comma-separated segment the
-     * cursor is currently editing.
-     */
     const cursor =
         searchInput.selectionStart;
 
@@ -10059,19 +7315,12 @@ function removeCurrentPartialTag() {
          ? value.length
          : afterCursor;
 
-    /*
-     * Remove the current segment.
-     */
     const before =
         value.slice(0, start);
 
     const after =
         value.slice(end);
 
-    /*
-     * Clean up the comma/space around the removed
-     * segment without disturbing the other tags.
-     */
     let newValue =
         before + after;
 
@@ -10082,11 +7331,6 @@ function removeCurrentPartialTag() {
         .replace(/\s+,/g, ",")
         .replace(/,\s*$/, ", ");
 
-    /*
-     * If there is a comma immediately before the
-     * removed segment and nothing follows it,
-     * preserve the ", " completion format.
-     */
     if (
         newValue &&
         !newValue.endsWith(", ")) {
@@ -10101,11 +7345,6 @@ function removeCurrentPartialTag() {
 
     suggestionBox.innerHTML = "";
 
-    /*
-     * Update the "previous" value so the next
-     * input event doesn't think the deletion was
-     * something else.
-     */
     previousSearchValue =
         searchInput.value;
 }
@@ -10164,10 +7403,6 @@ searchInput.addEventListener("input", () => {
     const currentIndex =
         getCurrentTagIndex();
 
-    /*
-     * If the user moved to a different tag,
-     * validate the one they just left.
-     */
     if (
         currentIndex !== activeTagIndex) {
 
@@ -10176,8 +7411,6 @@ searchInput.addEventListener("input", () => {
 
         validatePreviousTag();
 
-        // Recalculate because removing a tag
-        // may have changed the indexes.
         activeTagIndex =
             getCurrentTagIndex();
 
@@ -10202,10 +7435,6 @@ searchInput.addEventListener("input", () => {
     const text =
         currentTag.toLowerCase();
 
-    /*
-     * Tags before and after the current one are
-     * excluded from suggestions.
-     */
     const enteredTags = parts
         .map((tag, index) => ({
                 tag: tag.trim(),
@@ -10218,8 +7447,7 @@ searchInput.addEventListener("input", () => {
 
     if (text) {
 
-        getSortedMatches(
-            text,
+        getSortedMatches(text,
             enteredTags).forEach(tag => {
 
             const div =
@@ -10244,9 +7472,6 @@ searchInput.addEventListener("input", () => {
                     .map(part => part.trim())
                     .join(", ");
 
-                // If this was the final tag, give
-                // the user the normal trailing
-                // comma/space editing position.
                 if (
                     activeTagIndex ===
                     parts.length - 1) {
@@ -10264,8 +7489,7 @@ searchInput.addEventListener("input", () => {
                 const newPosition =
                     searchInput.value.length;
 
-                searchInput.setSelectionRange(
-                    newPosition,
+                searchInput.setSelectionRange(newPosition,
                     newPosition);
 
             };
@@ -10304,9 +7528,6 @@ searchInput.addEventListener("click", () => {
 });
 
 searchInput.addEventListener("keydown", e => {
-    // =========================================
-    // TAB = AUTOCORRECT CURRENT PARTIAL TAG
-    // =========================================
 
     if (e.key === "Tab" && !e.shiftKey) {
 
@@ -10333,8 +7554,7 @@ searchInput.addEventListener("keydown", e => {
             .map(item => item.tag);
 
         const matches =
-            getSortedMatches(
-                partial,
+            getSortedMatches(partial,
                 enteredTags);
 
         if (matches.length) {
@@ -10347,16 +7567,9 @@ searchInput.addEventListener("keydown", e => {
                 .map(part => part.trim())
                 .join(", ");
 
-            /*
-             * We have now completed this tag.
-             * Treat the NEXT tag as the active editing
-             * position.
-             */
             const nextIndex =
                 activeTagIndex + 1;
 
-            // If this was the final tag, create the
-            // empty editing position after it.
             if (
                 nextIndex >= parts.length) {
 
@@ -10364,11 +7577,6 @@ searchInput.addEventListener("keydown", e => {
 
             }
 
-            /*
-             * Recalculate the active tag based on the
-             * position immediately after the corrected
-             * tag.
-             */
             let cursorPosition = 0;
 
             for (
@@ -10383,8 +7591,6 @@ searchInput.addEventListener("keydown", e => {
                     cursorPosition += 2;
             }
 
-            // Move past the comma and space after
-            // the corrected tag.
             cursorPosition += 2;
 
             activeTagIndex =
@@ -10398,19 +7604,13 @@ searchInput.addEventListener("keydown", e => {
 
             searchInput.focus();
 
-            searchInput.setSelectionRange(
-                cursorPosition,
+            searchInput.setSelectionRange(cursorPosition,
                 cursorPosition);
 
         }
 
         return;
     }
-
-    // =========================================
-    // SHIFT+TAB = REMOVE CURRENT PARTIAL TAG
-    // OR RIGHTMOST COMPLETED TAG
-    // =========================================
 
     if (e.key === "Tab" && e.shiftKey) {
 
@@ -10425,8 +7625,6 @@ searchInput.addEventListener("keydown", e => {
 
         let removeIndex;
 
-        // If there is text in the current area,
-        // remove that tag.
         if (current) {
 
             removeIndex =
@@ -10434,8 +7632,6 @@ searchInput.addEventListener("keydown", e => {
 
         }
 
-        // Otherwise we're in the empty area after
-        // the last comma, so remove the rightmost tag.
         else {
 
             removeIndex =
@@ -10476,16 +7672,11 @@ searchInput.addEventListener("keydown", e => {
         const position =
             searchInput.value.length;
 
-        searchInput.setSelectionRange(
-            position,
+        searchInput.setSelectionRange(position,
             position);
 
         return;
     }
-
-    // =========================================
-    // DOWN = NEXT SUGGESTION
-    // =========================================
 
     if (e.key === "ArrowDown") {
 
@@ -10507,10 +7698,6 @@ searchInput.addEventListener("keydown", e => {
 
         return;
     }
-
-    // =========================================
-    // UP = PREVIOUS SUGGESTION
-    // =========================================
 
     if (e.key === "ArrowUp") {
 
@@ -10543,10 +7730,6 @@ searchInput.addEventListener("keydown", e => {
         return;
     }
 
-    // =========================================
-    // ENTER = ACCEPT SELECTED SUGGESTION
-    // =========================================
-
     if (
         e.key === "Enter" &&
         selectedSuggestionIndex >= 0 &&
@@ -10564,7 +7747,6 @@ searchInput.addEventListener("keydown", e => {
 
 }, true);
 
-//listen on entire doc
 document.addEventListener("mousedown", e => {
 
     if (
@@ -10637,21 +7819,17 @@ function showSearchResults(results) {
 
     closeModal(false);
 
-    // Remove album URL state
     history.replaceState(
         null,
         "",
         window.location.pathname);
 
-    // Reset album state
     isQueryAlbum = false;
     currentAlbum = null;
 
-    // Hide album controls
     document.getElementById("backButton").style.display = "none";
     document.getElementById("saveButton").style.display = "none";
 
-    // Hide / clear tags
     const tagContainer =
         document.getElementById("tagBar");
 
@@ -10659,9 +7837,7 @@ function showSearchResults(results) {
 
         tagContainer.style.display = "none";
 
-        document.getElementById(
-            "tagToggle"
-        ).style.display = "none";
+        document.getElementById("tagToggle").style.display = "none";
 
     }
 
@@ -10716,18 +7892,6 @@ function showSearchResults(results) {
         gallery.appendChild(card);
 
     });
-
-    /*
-     * -------------------------------------------------
-     * INITIAL GALLERY LAYOUT
-     * -------------------------------------------------
-     *
-     * The gallery has just been rebuilt, so its
-     * dimensions may not yet have settled.
-     *
-     * Start the same resize tracking used when the
-     * browser itself is resized.
-     */
 
     startGalleryResizeTracking();
 
@@ -10821,9 +7985,6 @@ function loadTagBarState() {
     const hidden =
         localStorage.getItem("tagBarHidden") === "true";
 
-    /*
-     * Prevent the saved state from animating.
-     */
     tagBar.classList.add("noTransition");
 
     if (hidden) {
@@ -10833,16 +7994,8 @@ function loadTagBarState() {
         tagBar.style.visibility = "visible";
     }
 
-    /*
-     * Force the browser to acknowledge the
-     * non-animated state.
-     */
     tagBar.offsetWidth;
 
-    /*
-     * Restore normal transitions for future
-     * user-triggered toggles.
-     */
     tagBar.classList.remove("noTransition");
 }
 
@@ -10858,8 +8011,7 @@ function cancelCenterReturn() {
 
     if (centerReturnAnimation !== null) {
 
-        cancelAnimationFrame(
-            centerReturnAnimation);
+        cancelAnimationFrame(centerReturnAnimation);
 
         centerReturnAnimation = null;
 
@@ -10869,18 +8021,8 @@ function cancelCenterReturn() {
 
 function scheduleCenterReturn() {
 
-    /*
-     * If a countdown is already running,
-     * don't start another one.
-     */
-
     if (centerReturnTimer !== null)
         return;
-
-    /*
-     * Don't schedule anything if already centered
-     * and already at the minimum zoom.
-     */
 
     if (
         Math.abs(imgTransform.x) < 0.01 &&
@@ -10891,20 +8033,10 @@ function scheduleCenterReturn() {
 
     }
 
-    /*
-     * -------------------------------------------------
-     * WAIT BEFORE STARTING
-     * -------------------------------------------------
-     */
-
     centerReturnTimer =
         setTimeout(() => {
 
             centerReturnTimer = null;
-
-            /*
-             * User interacted while waiting.
-             */
 
             if (
                 imgDragging ||
@@ -10915,10 +8047,6 @@ function scheduleCenterReturn() {
 
             }
 
-            /*
-             * Get the current image.
-             */
-
             const img =
                 displayingFull
                  ? modalImgFull
@@ -10926,10 +8054,6 @@ function scheduleCenterReturn() {
 
             if (!img)
                 return;
-
-            /*
-             * Capture the current position and zoom.
-             */
 
             const startX =
                 imgTransform.x;
@@ -10940,10 +8064,6 @@ function scheduleCenterReturn() {
             const startScale =
                 imgTransform.scale;
 
-            /*
-             * Already completely centered.
-             */
-
             if (
                 Math.abs(startX) < 0.01 &&
                 Math.abs(startY) < 0.01 &&
@@ -10953,12 +8073,6 @@ function scheduleCenterReturn() {
 
             }
 
-            /*
-             * -------------------------------------------------
-             * ANIMATION
-             * -------------------------------------------------
-             */
-
             const startTime =
                 performance.now();
 
@@ -10966,10 +8080,6 @@ function scheduleCenterReturn() {
                 centerAnimationDuration;
 
             function animateCenter(now) {
-
-                /*
-                 * User interaction cancels the animation.
-                 */
 
                 if (
                     imgDragging ||
@@ -10989,19 +8099,11 @@ function scheduleCenterReturn() {
                         (now - startTime) /
                         duration);
 
-                /*
-                 * Ease-out.
-                 */
-
                 const eased =
                     1 -
                     Math.pow(
                         1 - progress,
                         3);
-
-                /*
-                 * Animate BOTH position and zoom.
-                 */
 
                 imgTransform.x =
                     startX *
@@ -11023,8 +8125,7 @@ function scheduleCenterReturn() {
                 if (progress < 1) {
 
                     centerReturnAnimation =
-                        requestAnimationFrame(
-                            animateCenter);
+                        requestAnimationFrame(animateCenter);
 
                 } else {
 
@@ -11042,8 +8143,7 @@ function scheduleCenterReturn() {
             }
 
             centerReturnAnimation =
-                requestAnimationFrame(
-                    animateCenter);
+                requestAnimationFrame(animateCenter);
 
         }, 3000);
 
@@ -11069,7 +8169,6 @@ function decodeBase64URL(encoded) {
             .replace(/-/g, "+")
             .replace(/_/g, "/");
 
-        // Restore Base64 padding
         while (encoded.length % 4)
             encoded += "=";
 
@@ -11083,7 +8182,1406 @@ function decodeBase64URL(encoded) {
         return new TextDecoder().decode(bytes);
 
     } catch (error) {
-        console.error("[BASE64] Decode failed:", error);
+
         return null;
     }
+}
+
+function openAddImageEditor() {
+
+    const existing =
+        document.getElementById("addImageEditor");
+
+    if (existing) {
+
+        existing.remove();
+
+    }
+
+    const overlay =
+        document.createElement("div");
+
+    overlay.id =
+        "addImageEditor";
+
+    overlay.style.position =
+        "fixed";
+
+    overlay.style.inset =
+        "0";
+
+    overlay.style.zIndex =
+        "10000";
+
+    overlay.style.background =
+        "rgba(0,0,0,0.75)";
+
+    overlay.style.display =
+        "flex";
+
+    overlay.style.alignItems =
+        "center";
+
+    overlay.style.justifyContent =
+        "center";
+
+    const editor =
+        document.createElement("div");
+
+    editor.style.background =
+        "#222";
+
+    editor.style.padding =
+        "20px";
+
+    editor.style.borderRadius =
+        "8px";
+
+    editor.style.width =
+        "min(500px, 90vw)";
+
+    editor.style.boxSizing =
+        "border-box";
+
+    const title =
+        document.createElement("div");
+
+    title.textContent =
+        "Add Image";
+
+    title.style.fontSize =
+        "20px";
+
+    title.style.marginBottom =
+        "15px";
+
+    editor.appendChild(title);
+
+    const fields = {};
+
+    [
+        ["thumb", "Thumbnail URL"],
+        ["medium", "Medium URL"],
+        ["image", "Large / Full URL"]
+    ].forEach(
+        ([name, label]) => {
+
+            const container =
+                document.createElement("div");
+
+            container.style.marginBottom =
+                "12px";
+
+            const text =
+                document.createElement("div");
+
+            text.textContent =
+                label;
+
+            text.style.marginBottom =
+                "4px";
+
+            const input =
+                document.createElement("input");
+
+            input.type =
+                "text";
+
+            input.placeholder =
+                "https://...";
+
+            input.style.width =
+                "100%";
+
+            input.style.boxSizing =
+                "border-box";
+
+            input.style.padding =
+                "8px";
+
+            fields[name] =
+                input;
+
+            container.appendChild(text);
+
+            container.appendChild(input);
+
+            editor.appendChild(container);
+
+        }
+    );
+
+    const buttons =
+        document.createElement("div");
+
+    buttons.style.display =
+        "flex";
+
+    buttons.style.justifyContent =
+        "flex-end";
+
+    buttons.style.gap =
+        "10px";
+
+    const cancel =
+        document.createElement("button");
+
+    cancel.textContent =
+        "Cancel";
+
+    cancel.onclick =
+        () => {
+
+            overlay.remove();
+
+        };
+
+    const add =
+        document.createElement("button");
+
+    add.textContent =
+        "Add Image";
+
+    add.onclick =
+        () => {
+
+            const thumb =
+                fields.thumb.value.trim();
+
+            const medium =
+                fields.medium.value.trim();
+
+            const image =
+                fields.image.value.trim();
+
+            if (
+                !thumb &&
+                !medium &&
+                !image
+            ) {
+
+                alert("Enter at least one image URL.");
+
+                return;
+
+            }
+
+            const fallback =
+                image ||
+                medium ||
+                thumb;
+
+            const newImage = {
+
+				thumb: {
+					url:
+						thumb ||
+						fallback
+				},
+
+				medium: {
+					url:
+						medium ||
+						image ||
+						fallback
+				},
+
+				image: {
+					url:
+						image ||
+						medium ||
+						fallback
+				},
+
+				tags:
+					[],
+
+				added:
+					true
+
+			};
+
+            if (
+                !Array.isArray(currentAlbum.images)
+            ) {
+
+                currentAlbum.images =
+                    [];
+
+            }
+
+            currentAlbum.images.push(newImage);
+
+            currentAlbum.edited =
+                true;
+
+            overlay.remove();
+
+            showEditedAlbumSaveButton();
+
+            loadAlbum(currentAlbum, false);
+
+        };
+
+    buttons.appendChild(cancel);
+
+    buttons.appendChild(add);
+
+    editor.appendChild(buttons);
+
+    overlay.appendChild(editor);
+
+    document.body.appendChild(overlay);
+
+    fields.thumb.focus();
+
+}
+
+function showAddImageButton() {
+
+    let button =
+        document.getElementById("addAlbumImageButton");
+
+    if (!button) {
+
+        button =
+            document.createElement("button");
+
+        button.id =
+            "addAlbumImageButton";
+
+        button.textContent =
+            "+ Add Image";
+
+        button.onclick =
+            () => {
+
+                openAddImageEditor();
+
+            };
+
+        button.style.position =
+            "fixed";
+
+        button.style.bottom =
+            "10px";
+
+        button.style.left =
+            "50%";
+
+        button.style.transform =
+            "translateX(-50%)";
+
+        button.style.zIndex =
+            "5000";
+
+        document.body.appendChild(button);
+
+    }
+
+    button.style.display =
+        "";
+
+}
+
+function hideAddImageButton() {
+
+    const button =
+        document.getElementById("addAlbumImageButton");
+
+    if (button) {
+
+        button.style.display =
+            "none";
+
+    }
+
+}
+
+function showEditedAlbumSaveButton() {
+
+    const saveButton =
+        document.getElementById("saveButton");
+
+    if (!saveButton)
+        return;
+
+    saveButton.style.display =
+        "";
+
+    saveButton.onclick =
+        () => {
+
+            if (!currentAlbum)
+                return;
+
+            let saved =
+                JSON.parse(
+                    localStorage.getItem("savedAlbums") || "[]"
+                );
+
+            const savedAlbum =
+                JSON.parse(
+                    JSON.stringify(currentAlbum)
+                );
+
+            savedAlbum.storage =
+                true;
+
+            savedAlbum.edited =
+                true;
+
+            saved =
+                saved.filter(
+                    album =>
+                        album.id !==
+                        savedAlbum.id
+                );
+
+            saved.push(savedAlbum);
+
+            localStorage.setItem(
+                "savedAlbums",
+                JSON.stringify(saved)
+            );
+
+            currentAlbum =
+                savedAlbum;
+
+            alert("Album saved locally.");
+
+            showEditedAlbumSaveButton();
+
+        };
+
+}
+
+async function initializeTelegramClient() {
+
+    if (window.telegramClient) {
+
+        return window.telegramClient;
+
+    }
+
+    if (
+        !window.telegramAppId ||
+        !window.telegramAppHash
+    ) {
+
+        return null;
+
+    }
+
+    if (
+        !window.TelegramClient ||
+        !window.TelegramStorageIndexedDB
+    ) {
+
+        throw new Error("MTKruto has not been loaded.");
+
+    }
+
+    const client =
+        new window.TelegramClient({
+
+            apiId:
+                Number(window.telegramAppId),
+
+            apiHash:
+                window.telegramAppHash,
+
+            storage:
+                new window.TelegramStorageIndexedDB("telegram-browser-gallery")
+
+        });
+
+    window.telegramClient =
+        client;
+
+    await client.start({
+
+        phone: async () => {
+
+            const value =
+                prompt("Enter your Telegram phone number:");
+
+            if (value === null) {
+                throw new Error("Telegram login cancelled.");
+            }
+
+            return value;
+
+        },
+
+        code: async () => {
+
+            const value =
+                prompt("Enter the Telegram login code:");
+
+            if (value === null) {
+                throw new Error("Telegram login cancelled.");
+            }
+
+            return value;
+
+        },
+
+        password: async () => {
+
+            const value =
+                prompt("Enter your Telegram 2FA password:");
+
+            if (value === null) {
+                throw new Error("Telegram login cancelled.");
+
+            }
+
+            return value;
+
+        }
+
+    });
+
+    return client;
+}
+
+async function loadTelegramAlbumCover(album) {
+
+    if (
+        !window.telegramClient
+    ) {
+        throw new Error("Telegram client is not initialized.");
+    }
+
+    const client =
+        window.telegramClient;
+
+    const match =
+        album.url.match(
+            /^tg:\/\/chat\/(-?\d+)(?:\?(.+))?$/
+        );
+
+    if (!match) {
+        throw new Error(
+            "Invalid Telegram album URL: " +
+            album.url
+        );
+    }
+
+    const chatId =
+        Number(match[1]);
+
+    const optionString =
+        match[2] ||
+        "";
+
+    const options =
+        new URLSearchParams(optionString);
+
+    const coverMessageID =
+        options.get("cover");
+
+    let chat =
+        null;
+
+    if (
+        Array.isArray(window.telegramChats)
+    ) {
+
+        const found =
+            window.telegramChats.find(
+                item =>
+                    item &&
+                    item.chat &&
+                    String(item.chat.id) ===
+                    String(chatId)
+            );
+
+        if (found) {
+            chat =
+                found.chat;
+        }
+
+    }
+
+    if (!chat) {
+
+        const chats =
+            await client.getChats();
+
+        window.telegramChats =
+            chats;
+
+        const found =
+            chats.find(
+                item =>
+                    item &&
+                    item.chat &&
+                    String(item.chat.id) ===
+                    String(chatId)
+            );
+
+        if (found) {
+            chat =
+                found.chat;
+        }
+
+    }
+
+    if (!chat) {
+        throw new Error(
+            "Telegram chat was not found: " +
+            chatId
+        );
+    }
+
+    let message = null;
+
+    if (coverMessageID) {
+
+        message =
+            await client.getMessage(
+                chat.id,
+                Number(coverMessageID)
+            );
+
+    }
+    else {
+
+        const messages =
+            await client.getHistory(
+                chat.id,
+                {
+                    limit: 100
+                }
+            );
+
+        message =
+            messages.find(
+                message =>
+                    message &&
+                    message.document &&
+                    typeof message.document.mimeType ===
+                        "string" &&
+                    message.document.mimeType.startsWith("image/")
+            );
+
+    }
+
+    if (
+        !message ||
+        !message.document
+    ) {
+
+        throw new Error("Telegram cover message is not an image.");
+
+    }
+
+    const fileDocument =
+        message.document;
+
+    const mimeType =
+        fileDocument.mimeType ||
+        "image/jpeg";
+
+    let thumbnail =
+        null;
+
+    if (
+        Array.isArray(fileDocument.thumbnails) &&
+        fileDocument.thumbnails.length
+    ) {
+
+        thumbnail =
+            fileDocument.thumbnails
+                .slice()
+                .sort(
+                    (a, b) =>
+                        (
+                            (b.width || 0) *
+                            (b.height || 0)
+                        ) -
+                        (
+                            (a.width || 0) *
+                            (a.height || 0)
+                        )
+                )[0];
+
+    }
+
+    if (!thumbnail) {
+
+        throw new Error("Telegram cover has no thumbnail.");
+
+    }
+
+    const chunks =
+        [];
+
+    for await (
+        const chunk of
+        client.download(
+            thumbnail.fileId,
+            {
+                chunkSize:
+                    64 * 1024
+            }
+        )
+    ) {
+
+        chunks.push(chunk);
+
+    }
+
+    const blob =
+        new Blob(
+            chunks,
+            {
+                type:
+                    mimeType
+            }
+        );
+
+    const url =
+        URL.createObjectURL(blob);
+
+    return {
+        url:
+            url,
+
+        messageID:
+            message.id
+    };
+}
+
+async function populateTelegramAlbumChats(select) {
+
+    if (!select)
+        return;
+
+    if (
+        !window.telegramClient
+    ) {
+
+        select.innerHTML = `
+            <option value="">
+                Telegram is not initialized
+            </option>
+        `;
+
+        return;
+
+    }
+
+    try {
+
+        let chats =
+            Array.isArray(window.telegramChats)
+                ? window.telegramChats
+                : null;
+
+        if (!chats) {
+
+            chats =
+                await window.telegramClient.getChats();
+
+            window.telegramChats =
+                chats;
+
+        }
+
+        const usedChatIDs =
+            new Set();
+
+        if (
+            Array.isArray(albums)
+        ) {
+
+            albums.forEach(
+                album => {
+
+                    if (
+                        !album ||
+                        typeof album.url !== "string"
+                    ) {
+                        return;
+                    }
+
+                    const match =
+                        album.url.match(
+                            /^tg:\/\/chat\/(-?\d+)/
+                        );
+
+                    if (match) {
+
+                        usedChatIDs.add(
+                            String(match[1])
+                        );
+
+                    }
+
+                }
+            );
+
+        }
+
+        const availableChats =
+            [];
+
+        chats.forEach(
+            item => {
+
+                if (
+                    !item ||
+                    !item.chat
+                ) {
+                    return;
+                }
+
+                const chat =
+                    item.chat;
+
+                const chatID =
+                    String(chat.id);
+
+                if (
+                    usedChatIDs.has(chatID)
+                ) {
+
+                    return;
+
+                }
+
+                const type =
+                    String(
+                        chat.type ||
+                        ""
+                    ).toLowerCase();
+
+                if (
+                    type === "private" ||
+                    type === "user" ||
+                    type === "bot"
+                ) {
+
+                    return;
+
+                }
+
+                availableChats.push(chat);
+
+            }
+        );
+
+        availableChats.sort(
+            (a, b) =>
+                String(
+                    a.title ||
+                    a.username ||
+                    a.id
+                ).localeCompare(
+                    String(
+                        b.title ||
+                        b.username ||
+                        b.id
+                    )
+                )
+        );
+
+        select.innerHTML = `
+            <option value="">
+                Select Telegram chat
+            </option>
+        `;
+
+        availableChats.forEach(
+            chat => {
+
+                const option =
+                    document.createElement("option");
+
+                option.value =
+                    chat.id;
+
+                option.textContent =
+                    chat.title ||
+                    chat.username ||
+                    String(chat.id);
+
+                select.appendChild(option);
+
+            }
+        );
+
+        if (
+            !availableChats.length
+        ) {
+
+            const option =
+                document.createElement("option");
+
+            option.value =
+                "";
+
+            option.textContent =
+                "No unused Telegram chats";
+
+            select.appendChild(option);
+
+        }
+
+    }
+    catch (error) {
+
+        select.innerHTML = `
+            <option value="">
+                Failed to load Telegram chats
+            </option>
+        `;
+
+    }
+
+}
+
+async function openTemporaryTelegramAlbum(chatID) {
+
+    if (
+        !chatID
+    ) {
+        return;
+    }
+
+    if (
+        !window.telegramClient
+    ) {
+
+        alert("Telegram client is not initialized.");
+
+        return;
+
+    }
+
+    try {
+
+        let chat =
+            null;
+
+        if (
+            Array.isArray(window.telegramChats)
+        ) {
+
+            const found =
+                window.telegramChats.find(
+                    item =>
+                        item &&
+                        item.chat &&
+                        String(item.chat.id) ===
+                        String(chatID)
+                );
+
+            if (found) {
+
+                chat =
+                    found.chat;
+
+            }
+
+        }
+
+        if (!chat) {
+
+            const chats =
+                await window.telegramClient.getChats();
+
+            window.telegramChats =
+                chats;
+
+            const found =
+                chats.find(
+                    item =>
+                        item &&
+                        item.chat &&
+                        String(item.chat.id) ===
+                        String(chatID)
+                );
+
+            if (found) {
+
+                chat =
+                    found.chat;
+
+            }
+
+        }
+
+        if (!chat) {
+
+            throw new Error(
+                "Telegram chat was not found: " +
+                chatID
+            );
+
+        }
+
+        const messages =
+            await window.telegramClient.getHistory(
+                chat.id,
+                {
+                    limit:
+                        100
+                }
+            );
+
+        const imageMessages =
+            [];
+
+        for (
+            const message of
+            messages
+        ) {
+
+            if (
+                !message ||
+                !message.document
+            ) {
+
+                continue;
+
+            }
+
+            const document =
+                message.document;
+
+            const mimeType =
+                document.mimeType ||
+                "";
+
+            if (
+                !mimeType.startsWith("image/")
+            ) {
+
+                continue;
+
+            }
+
+            imageMessages.push(message);
+
+        }
+
+        if (
+            !imageMessages.length
+        ) {
+
+            alert("No image messages were found in this Telegram chat.");
+
+            return;
+
+        }
+
+        const messageIDs =
+            imageMessages.map(
+                message =>
+                    message.id
+            );
+
+        const coverMessageID =
+            imageMessages[0].id;
+
+        const telegramURL =
+            "tg://chat/" +
+            String(chat.id) +
+            "?cover=" +
+            encodeURIComponent(coverMessageID) +
+            "&messages=" +
+            messageIDs
+                .map(
+                    id =>
+                        encodeURIComponent(id)
+                )
+                .join(",");
+
+        const album =
+            {
+                id:
+                    generateAlbumID(
+                        chat.title ||
+                        chat.username ||
+                        "Telegram Album"
+                    ),
+
+                name:
+                    chat.title ||
+                    chat.username ||
+                    "Telegram Album",
+
+                url:
+                    telegramURL,
+
+                tags:
+                    [],
+
+                images:
+                    [],
+
+                temporary:
+                    true,
+
+                edited:
+                    false
+            };
+
+        currentTemporaryAlbumID =
+            album.id;
+
+        saveTemporaryAlbum(album);
+
+        history.pushState(
+            null,
+            "",
+            "?=" +
+            encodeURIComponent(album.id)
+        );
+
+        loadAlbum(album, false);
+
+        showAlbumButtons(true);
+
+    }
+    catch (error) {
+
+        alert(
+            "Failed to open Telegram album:\n\n" +
+            (
+                error &&
+                error.message
+                    ? error.message
+                    : String(error)
+            )
+        );
+
+    }
+
+}
+
+async function reloadAlbums() {
+
+    albums.length = 0;
+
+    const GITHUB_STORAGE_KEY =
+        "githubID";
+
+    const query =
+        window.location.search.substring(1);
+
+    let pasteID =
+        null;
+
+    if (
+        query.startsWith("@")
+    ) {
+
+        pasteID =
+            decodeBase64URL(
+                query.substring(1)
+            );
+
+        if (
+            !pasteID
+        ) {
+
+            pasteID =
+                null;
+
+        }
+        else {
+
+            localStorage.setItem(GITHUB_STORAGE_KEY,
+                pasteID);
+
+        }
+
+    }
+
+    else {
+
+        pasteID =
+            localStorage.getItem(GITHUB_STORAGE_KEY);
+
+    }
+
+    let manualAlbums = [];
+
+    if (pasteID) {
+
+        try {
+
+            const response =
+                await fetch(pasteID);
+
+            if (!response.ok) {
+
+                throw new Error(`HTTP ${response.status}`);
+
+            }
+
+            const text =
+                await response.text();
+
+            const start =
+                text.indexOf("MANUAL_ALBUMS");
+
+            if (
+                start === -1
+            ) {
+
+                throw new Error("MANUAL_ALBUMS was not found in GitHub file.");
+
+            }
+
+            const arrayStart =
+                text.indexOf(
+                    "[",
+                    start
+                );
+
+            if (
+                arrayStart === -1
+            ) {
+
+                throw new Error("MANUAL_ALBUMS array start was not found.");
+
+            }
+
+            let depth =
+                0;
+
+            let arrayEnd =
+                -1;
+
+            let inString =
+                false;
+
+            let stringChar =
+                null;
+
+            let escaped =
+                false;
+
+            for (
+                let i = arrayStart;
+                i < text.length;
+                i++
+            ) {
+
+                const char =
+                    text[i];
+
+                if (escaped) {
+
+                    escaped =
+                        false;
+
+                    continue;
+
+                }
+
+                if (inString) {
+
+                    if (
+                        char === "\\"
+                    ) {
+
+                        escaped =
+                            true;
+
+                    }
+                    else if (
+                        char === stringChar
+                    ) {
+
+                        inString =
+                            false;
+
+                        stringChar =
+                            null;
+
+                    }
+
+                    continue;
+
+                }
+
+                if (
+                    char === '"' ||
+                    char === "'" ||
+                    char === "`"
+                ) {
+
+                    inString =
+                        true;
+
+                    stringChar =
+                        char;
+
+                    continue;
+
+                }
+
+                if (
+                    char === "["
+                ) {
+
+                    depth++;
+
+                }
+                else if (
+                    char === "]"
+                ) {
+
+                    depth--;
+
+                    if (
+                        depth === 0
+                    ) {
+
+                        arrayEnd =
+                            i;
+
+                        break;
+
+                    }
+
+                }
+
+            }
+
+            if (
+                arrayEnd === -1
+            ) {
+
+                throw new Error("Could not find end of MANUAL_ALBUMS.");
+
+            }
+
+            const arrayText =
+                text.substring(
+                    arrayStart,
+                    arrayEnd + 1
+                );
+
+            manualAlbums =
+                Function(
+                    `"use strict"; return (${arrayText});`
+                )();
+
+            if (
+                !Array.isArray(manualAlbums)
+            ) {
+
+                throw new Error("Extracted MANUAL_ALBUMS is not an array.");
+
+            }
+
+        }
+        catch (error) {
+
+            manualAlbums =
+                [];
+
+        }
+
+    }
+
+    else if (
+        typeof MANUAL_ALBUMS !==
+        "undefined"
+    ) {
+
+        manualAlbums =
+            MANUAL_ALBUMS;
+
+    }
+
+    manualAlbums.forEach(
+		album => {
+
+			const isTelegram =
+				typeof album.url === "string" &&
+				album.url.startsWith("tg://chat/");
+
+			albums.push({
+
+				id:
+					album.id,
+
+				name:
+					album.name,
+
+				images:
+					isTelegram
+						? []
+						: parseQuery(
+							getAlbumQuery(album.url)
+						),
+
+				url:
+					album.url,
+
+				tags:
+					album.tags ||
+					[]
+
+			});
+
+		}
+	);
+
+    const saved =
+        JSON.parse(
+            localStorage.getItem("savedAlbums") || "[]"
+        );
+
+    saved.forEach(
+        album => {
+
+            albums.push({
+
+                ...album,
+
+                tags:
+                    album.tags ||
+                    [],
+
+                storage:
+                    true
+
+            });
+
+        }
+    );
+
+}
+
+function showAlbumButtons(show) {
+
+    document.getElementById("backButton").style.display =
+        show ? "" : "none";
+
+    document.getElementById("saveButton").style.display =
+        (
+            show &&
+            (
+                isQueryAlbum ||
+                currentTemporaryAlbumID !== null
+            )
+        )
+            ? "flex"
+            : "none";
+
+    document.getElementById("regenerateAlbum").style.display =
+        show ? "" : "none";
+
+    document.getElementById("tagToggle").style.display =
+        show ? "" : "none";
 }
