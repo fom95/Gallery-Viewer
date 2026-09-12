@@ -73,27 +73,64 @@
         "https://esm.sh/@mtkruto/browser"
     );
 
-
     window.TelegramClient =
         Client;
 
     window.TelegramStorageIndexedDB =
         StorageIndexedDB;
 
-
     console.log(
         "[TELEGRAM] MTKruto loaded."
     );
 
+    const moduleFiles = [
+        "00-state-and-config.js",
+        "01-album-routing-and-parsing.js",
+        "02-albums-home-view.js",
+        "03-temporary-albums-and-import-dialog.js",
+        "04-telegram-import.js",
+        "05-album-loading-and-render.js",
+        "06-image-asset-sources.js",
+        "07-thumbnail-loading-pipeline.js",
+        "08-medium-loading-pipeline.js",
+        "09-full-image-loader.js",
+        "10-modal-viewer.js",
+        "11-zoom-and-pan.js",
+        "12-image-navigation-and-touch.js",
+        "13-tag-filtering-and-gallery-layout.js",
+        "14-xmp-metadata.js",
+        "15-tag-search-and-suggestions.js",
+        "16-tag-bar-state-and-center-return.js",
+        "17-add-image-editor.js",
+        "18-reload-albums-and-persistence.js",
+        "19-album_editing.js",
+        "99-bootstrap.js"
+    ];
 
-    const script =
-        document.createElement("script");
+    function loadScript(src) {
+        return new Promise((resolve, reject) => {
+            const script =
+                document.createElement("script");
 
-    script.src =
-        "./script.js";
+            script.src =
+                "./modules/" + src;
 
-    document.body.appendChild(
-        script
+            script.onload = resolve;
+            script.onerror = () =>
+                reject(new Error("Failed to load " + src));
+
+            document.body.appendChild(
+                script
+            );
+        });
+    }
+
+    for (const file of moduleFiles) {
+        await loadScript(file);
+    }
+
+    console.log(
+        "[GALLERY] All modules loaded."
     );
 
 </script>
