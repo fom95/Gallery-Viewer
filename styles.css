@@ -278,7 +278,9 @@ button {
         left var(--gallery-animation-speed) ease,
         top var(--gallery-animation-speed) ease,
         width var(--gallery-animation-speed) ease,
-        height var(--gallery-animation-speed) ease;
+        height var(--gallery-animation-speed) ease,
+        filter 0.35s ease,
+        opacity 0.35s ease;
 }
 
 .thumb.flip-moving {
@@ -775,4 +777,106 @@ button {
 	justify-content: center;
 	bottom: 50px;
 	position: sticky;
+}
+/* ============================================================
+ * View transitions: home <-> album blur/fade, and the flying
+ * cover-image shared-element animation between them.
+ * ========================================================== */
+
+#content,
+#pageName {
+    transition:
+        opacity 0.82s ease,
+        filter 0.82s ease;
+}
+
+#content.view-fade,
+#pageName.view-fade {
+    opacity: 0;
+    filter: blur(18px);
+    pointer-events: none;
+}
+
+.view-fade-instant {
+    transition: none !important;
+}
+
+.reveal-instant {
+    transition: none !important;
+}
+
+.modal-reveal-transition {
+    transition:
+        width 0.42s cubic-bezier(.33, 1, .68, 1),
+        height 0.42s cubic-bezier(.33, 1, .68, 1),
+        filter 0.42s ease,
+        opacity 0.32s ease !important;
+}
+
+/*
+ * A plain snapshot of whatever the modal was showing before navigating
+ * to a different image (arrow keys, etc). It sits above the modal's
+ * own images and just fades out, so a switch between two
+ * already-loaded images reads as a clean crossfade instead of a hard
+ * cut or the thumbnail->real-image grow (which is reserved for images
+ * that are genuinely still loading).
+ */
+.modal-nav-outgoing {
+    position: fixed;
+    z-index: 5;
+    object-fit: contain;
+    pointer-events: none;
+    margin: 0;
+    transition: opacity 0.28s ease;
+}
+
+.gallery-add-tile {
+    position: absolute;
+    box-sizing: border-box;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 48px;
+    font-weight: 300;
+    color: white;
+
+    border-radius: 8px;
+    overflow: hidden;
+
+    cursor: pointer;
+}
+
+.gallery-add-tile::before {
+    content: "";
+
+    position: absolute;
+    inset: 8px;
+
+    border: 1px solid white;
+    border-radius: 8px;
+
+    pointer-events: none;
+}
+
+.gallery-add-tile:hover {
+    transform: scale(1.025);
+}
+
+.cover-flight {
+    position: fixed;
+    z-index: 9999;
+
+    margin: 0;
+    object-fit: cover;
+    border-radius: 8px;
+
+    pointer-events: none;
+
+    transition:
+        left 0.92s cubic-bezier(.33, 1, .68, 1),
+        top 0.92s cubic-bezier(.33, 1, .68, 1),
+        width 0.92s cubic-bezier(.33, 1, .68, 1),
+        height 0.92s cubic-bezier(.33, 1, .68, 1);
 }
