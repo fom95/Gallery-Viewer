@@ -296,65 +296,42 @@ function openAddImageEditor() {
 }
 
 
-function showAddImageButton() {
+/*
+ * Appends a clickable "+" tile to the end of the album grid, in the
+ * same spirit as the "Add New" tile on the home page. It's laid out by
+ * the normal gallery grid system (see calculateGalleryLayout(), which
+ * includes ".gallery-add-tile" alongside ".thumbnail-slot"), so it
+ * always sits right after the last image and reflows along with
+ * everything else -- rather than floating over the whole page.
+ */
+function createAddImageTile(gallery) {
 
-    let button =
-        document.getElementById("addAlbumImageButton");
+    if (!gallery)
+        return;
 
-    if (!button) {
+    const tile =
+        document.createElement("div");
 
-        button =
-            document.createElement("button");
+    tile.id =
+        "addAlbumImageTile";
 
-        button.id =
-            "addAlbumImageButton";
+    tile.className =
+        "gallery-add-tile";
 
-        button.textContent =
-            "+ Add Image";
+    tile.textContent =
+        "+";
 
-        button.onclick =
-            () => {
+    tile.title =
+        "Add Image";
 
-                openAddImageEditor();
+    tile.onclick =
+        () => {
 
-            };
+            openAddImageEditor();
 
-        button.style.position =
-            "fixed";
+        };
 
-        button.style.bottom =
-            "10px";
-
-        button.style.left =
-            "50%";
-
-        button.style.transform =
-            "translateX(-50%)";
-
-        button.style.zIndex =
-            "5000";
-
-        document.body.appendChild(button);
-
-    }
-
-    button.style.display =
-        "";
-
-}
-
-
-function hideAddImageButton() {
-
-    const button =
-        document.getElementById("addAlbumImageButton");
-
-    if (button) {
-
-        button.style.display =
-            "none";
-
-    }
+    gallery.appendChild(tile);
 
 }
 

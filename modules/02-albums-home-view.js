@@ -5,7 +5,29 @@
  * localStorage, and builds each album's tag summary.
  */
 
+/*
+ * Covers are chosen once per album per page load, then cached here by
+ * album id. This is a plain in-memory cache (not persisted), so it
+ * naturally resets on refresh but survives repeated showAlbums() calls
+ * -- including the ones that rebuild "storage" album objects from
+ * localStorage -- for the rest of the session.
+ */
+const homeCoverCache = new Map();
+
+
 async function showAlbums() {
+
+    /*
+     * The album page's "edit name" button is injected directly into
+     * #navCont by addAlbumPageEditButton() and isn't torn down when
+     * navigating away from an album, so it has to be removed here
+     * explicitly or it lingers on the home page.
+     */
+    const editNameButton =
+        document.getElementById("EditNameButton");
+
+    if (editNameButton)
+        editNameButton.remove();
 
     document.getElementById("regenerateAlbum").style.display =
         "none";
@@ -101,13 +123,22 @@ async function showAlbums() {
                 album.images.length
             ) {
 
+                if (!homeCoverCache.has(album.id)) {
+
+                    homeCoverCache.set(
+                        album.id,
+                        album.images[
+                            Math.floor(
+                                Math.random() *
+                                album.images.length
+                            )
+                        ]
+                    );
+
+                }
+
                 cover =
-                    album.images[
-                        Math.floor(
-                            Math.random() *
-                            album.images.length
-                        )
-                    ];
+                    homeCoverCache.get(album.id);
 
             }
 
@@ -116,6 +147,9 @@ async function showAlbums() {
 
             card.className =
                 "album";
+
+            card.dataset.albumId =
+                String(album.id);
 
             const img =
                 document.createElement("img");
@@ -154,7 +188,7 @@ async function showAlbums() {
             card.appendChild(title);
 
             card.onclick =
-                () => loadAlbum(album);
+                () => openAlbumWithTransition(album, img);
 
             /*
              * Telegram albums always have their Telegram
@@ -453,39 +487,40 @@ async function showAlbums() {
             );
 
             if (
-                isTelegram &&
-                window.telegramClient
-            ) {
+				isTelegram &&
+				album.images &&
+				album.images.length
+			) {
 
-                album._telegramCoverPromise =
-                    loadTelegramAlbumCover(
-                        album
-                    );
+				const cover =
+					album.images.find(
+						image =>
+							image &&
+							image.source === "telegram" &&
+							image.messageID != null
+					);
 
-                album._telegramCoverPromise
-                    .then(
-                        result => {
+				if (cover) {
 
-                            img.src =
-                                result.url;
+					const url =
+						getTelegramMediaURL(
+							cover,
+							"thumb"
+						);
 
-                            img.style.visibility =
-                                "visible";
+					if (url) {
 
-                        }
-                    )
-                    .catch(
-                        error => {
+						img.src =
+							url;
 
-                            console.error(
-                                "[TELEGRAM COVER FAILED]",
-                                error
-                            );
+						img.style.visibility =
+							"visible";
 
-                        }
-                    );
+					}
 
-            }
+				}
+
+			}
 
         }
     );
@@ -534,11 +569,7 @@ async function showAlbums() {
         false
     );
 
-    document.documentElement.classList.remove(
-        "pageLoading"
-    );
-
-    showAddImageButton();
+    revealPageIfNeeded();
 }
 
 
@@ -592,18 +623,7 @@ function refreshSavedAlbums() {
 
 function returnToAlbums() {
 
-    if (
-        currentTemporaryAlbumID
-    ) {
-
-        deleteTemporaryAlbum(currentTemporaryAlbumID);
-
-        currentTemporaryAlbumID =
-            null;
-
-    }
-
-    showAlbums();
+    goBackToAlbumsWithTransition();
 
 }
 

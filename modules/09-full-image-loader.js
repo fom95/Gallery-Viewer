@@ -86,6 +86,178 @@ let zoomSwitchedFromFull = false;
 let panStartedInFull = false;
 
 
+const MODAL_REVEAL_MS = 420;
+
+/*
+ * If a resolution becomes ready to show within this many ms of
+ * openModal() being called, it's treated as "already available" (the
+ * grid's medium image was already loaded, or resolveImageAsset()
+ * returned an already-cached blob instantly) rather than "just
+ * finished loading" -- so no grow/blur animation plays for it.
+ */
+const MODAL_INSTANT_THRESHOLD_MS = 100;
+
+/*
+ * Set at the top of every openModal() call (see 10-modal-viewer.js).
+ * Every reveal measures its own elapsed time against this to decide
+ * whether a real load just happened.
+ */
+let modalOpenStartedAt = 0;
+
+/*
+ * A snapshot of whatever the modal was previously showing, created by
+ * openModal() when navigating to a different image while the modal is
+ * already open. It fades away once the new image is ready to reveal
+ * (see revealModalResolution()) instead of the previous image just
+ * vanishing outright.
+ */
+let modalOutgoingClone = null;
+
+
+function fadeOutOutgoingClone() {
+
+    const clone =
+        modalOutgoingClone;
+
+    if (!clone)
+        return;
+
+    modalOutgoingClone =
+        null;
+
+    requestAnimationFrame(() => {
+
+        clone.style.opacity = "0";
+
+    });
+
+    setTimeout(() => {
+
+        clone.remove();
+
+    }, 320);
+
+}
+
+
+/*
+ * Grows an about-to-be-revealed modal image from the thumbnail's
+ * current on-screen size up to its real display size while it
+ * un-blurs, rather than just popping in at full size. The thumbnail
+ * itself blurs out and fades at the same time.
+ *
+ * "reveal-instant" (see styles.css) briefly kills the transition so
+ * the starting (small, blurred) state is applied immediately rather
+ * than itself animating in from whatever the element's previous size/
+ * filter was; "modal-reveal-transition" is then the one that actually
+ * animates the grow.
+ */
+function revealModalImageGrow(imgEl, finalWidth, finalHeight) {
+
+    if (!imgEl)
+        return;
+
+    const startWidth =
+        (modalImgSmall && modalImgSmall.style.width) ||
+        finalWidth + "px";
+
+    const startHeight =
+        (modalImgSmall && modalImgSmall.style.height) ||
+        finalHeight + "px";
+
+    imgEl.classList.add("reveal-instant");
+
+    imgEl.style.width = startWidth;
+    imgEl.style.height = startHeight;
+    imgEl.style.filter = "blur(20px)";
+    imgEl.style.visibility = "visible";
+
+    void imgEl.offsetWidth;
+
+    imgEl.classList.remove("reveal-instant");
+    imgEl.classList.add("modal-reveal-transition");
+
+    if (modalImgSmall) {
+
+        modalImgSmall.classList.add("modal-reveal-transition");
+        modalImgSmall.style.filter = "blur(20px)";
+        modalImgSmall.style.opacity = "0";
+
+    }
+
+    requestAnimationFrame(() => {
+
+        imgEl.style.width = finalWidth + "px";
+        imgEl.style.height = finalHeight + "px";
+        imgEl.style.filter = "blur(0px)";
+
+    });
+
+    setTimeout(() => {
+
+        imgEl.classList.remove("modal-reveal-transition");
+
+        if (modalImgSmall) {
+
+            modalImgSmall.classList.remove("modal-reveal-transition");
+            modalImgSmall.style.visibility = "hidden";
+
+        }
+
+    }, MODAL_REVEAL_MS);
+
+}
+
+
+/*
+ * Single entry point for revealing a modal image once its medium/full
+ * resolution is ready. Decides, based on how long this openModal()
+ * call has actually been running, whether this is a genuine load
+ * (grow in from the thumbnail, blurred) or something that was already
+ * available (show it directly, no animation) -- and either way, fades
+ * out any outgoing snapshot of the previously-displayed image.
+ */
+function revealModalResolution(imgEl, finalWidth, finalHeight) {
+
+    if (!imgEl)
+        return;
+
+    const elapsed =
+        performance.now() - modalOpenStartedAt;
+
+    const wasInstant =
+        elapsed < MODAL_INSTANT_THRESHOLD_MS;
+
+    if (finalWidth == null || wasInstant) {
+
+        if (finalWidth != null) {
+
+            imgEl.style.width = finalWidth + "px";
+            imgEl.style.height = finalHeight + "px";
+
+        }
+
+        imgEl.style.filter = "none";
+        imgEl.style.visibility = "visible";
+
+        if (modalImgSmall) {
+
+            modalImgSmall.style.visibility = "hidden";
+            modalImgSmall.style.opacity = "0";
+
+        }
+
+    } else {
+
+        revealModalImageGrow(imgEl, finalWidth, finalHeight);
+
+    }
+
+    fadeOutOutgoingClone();
+
+}
+
+
 async function load(url, name, loadID) {
 
 	if (!url)
@@ -428,17 +600,17 @@ async function load(url, name, loadID) {
 					decodedImage,
 					blobURL);
 
-			modalImgMedium.style.visibility =
-				"hidden";
-
-			modalImgMedium.style.opacity =
-				"1";
-
 			modalImgMedium.style.zIndex =
 				"3";
 
 			modalImgMedium.src =
 				blobURL;
+
+			let finalWidth =
+				null;
+
+			let finalHeight =
+				null;
 
 			if (
 				decodedImage &&
@@ -464,11 +636,11 @@ async function load(url, name, loadID) {
 						wH / iH
 					);
 
-				modalImgMedium.style.width =
-					`${iW * scale}px`;
+				finalWidth =
+					iW * scale;
 
-				modalImgMedium.style.height =
-					`${iH * scale}px`;
+				finalHeight =
+					iH * scale;
 
 			}
 
@@ -487,27 +659,24 @@ async function load(url, name, loadID) {
 			modalImgMedium.dataset.showingFull =
 				"false";
 
-			modalImgMedium.style.visibility =
-				"visible";
-
 			modalImgMedium.style.opacity =
 				"1";
-
-			modalImgMedium.style.filter =
-				"none";
 
 			modalImgMedium.style.zIndex =
 				"3";
 
-			if (modalImgSmall) {
-
-				modalImgSmall.style.visibility =
-					"hidden";
-
-				modalImgSmall.style.opacity =
-					"0";
-
-			}
+			/*
+			 * revealModalResolution() decides whether this counts as
+			 * "just finished a real load" (grow in from the
+			 * thumbnail, blurred) or "was already available" (show it
+			 * directly) based on how long this openModal() call has
+			 * actually taken so far.
+			 */
+			revealModalResolution(
+				modalImgMedium,
+				finalWidth,
+				finalHeight
+			);
 
 			if (modalImgFull) {
 
@@ -579,14 +748,8 @@ async function load(url, name, loadID) {
 			modalImgFull.src =
 				blobURL;
 
-			modalImgFull.style.visibility =
-				"hidden";
-
 			modalImgFull.style.opacity =
 				"1";
-
-			modalImgFull.style.filter =
-				"none";
 
 			fullImageLoaded =
 				true;
@@ -639,16 +802,25 @@ async function load(url, name, loadID) {
 
 			if (!modalMediumSrc) {
 
+				/*
+				 * No medium stage for this image -- it goes straight
+				 * from the thumbnail to full resolution, so it gets
+				 * the same grow-and-unblur treatment the medium stage
+				 * normally would.
+				 */
 				imgResize(modalImgFull);
+
+				const finalWidth =
+					parseFloat(modalImgFull.style.width) || null;
+
+				const finalHeight =
+					parseFloat(modalImgFull.style.height) || null;
 
 				modalImgFull.style.left =
 					"50%";
 
 				modalImgFull.style.top =
 					"50%";
-
-				modalImgFull.style.visibility =
-					"visible";
 
 				modalImgFull.style.zIndex =
 					"3";
@@ -659,15 +831,11 @@ async function load(url, name, loadID) {
 				modalImgFull.dataset.showingFull =
 					"true";
 
-				if (modalImgSmall) {
-
-					modalImgSmall.style.visibility =
-						"hidden";
-
-					modalImgSmall.style.opacity =
-						"0";
-
-				}
+				revealModalResolution(
+					modalImgFull,
+					finalWidth,
+					finalHeight
+				);
 
 				applyTransform();
 
@@ -690,6 +858,9 @@ async function load(url, name, loadID) {
 
 			modalImgFull.style.top =
 				"50%";
+
+			modalImgFull.style.filter =
+				"none";
 
 			modalImgFull.style.visibility =
 				"hidden";

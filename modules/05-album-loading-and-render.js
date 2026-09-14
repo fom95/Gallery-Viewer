@@ -81,6 +81,9 @@ async function loadAlbum(album, pushHistory = true) {
 			gallery
 		);
 	});
+
+    createAddImageTile(gallery);
+
     if (album.tags?.length)
         buildTagList(album.tags);
     else
@@ -90,10 +93,21 @@ async function loadAlbum(album, pushHistory = true) {
         loadTagBarState();
         applyGalleryLayout(false);
         startThumbnailLoading();
+
+        /*
+         * Signal that the gallery grid has been laid out and its
+         * thumbnail slots now have their real, final positions. The
+         * view-transition module waits for this before flying the
+         * clicked cover image into its slot.
+         */
+        document.dispatchEvent(
+            new CustomEvent("albumLayoutReady", {
+                detail: { album }
+            })
+        );
     }));
 
-    document.documentElement.classList.remove("pageLoading");
-    showAddImageButton();
+    revealPageIfNeeded();
 }
 
 

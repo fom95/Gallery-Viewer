@@ -17,6 +17,63 @@ let mediumCompletionPromise = null;
 let mediumCompletionResolve = null;
 
 
+const GRID_REVEAL_MS = 350;
+
+
+/*
+ * Crossfades a grid slot from its low-res thumbnail to its
+ * higher-resolution replacement: the incoming image fades in (starting
+ * transparent, ending opaque, no blur of its own) while the outgoing
+ * thumbnail stays exactly where it is and gradually blurs underneath
+ * it. Nothing is hidden or removed until the transition has actually
+ * finished, so there's never a moment where the slot shows nothing.
+ *
+ * "reveal-instant" (see styles.css) briefly kills the transition so
+ * the starting values apply immediately rather than themselves
+ * animating in from whatever was there before.
+ */
+function crossfadeGridReveal(incomingImg, outgoingImg) {
+
+    if (!incomingImg)
+        return;
+
+    incomingImg.classList.add("reveal-instant");
+    incomingImg.style.visibility = "visible";
+    incomingImg.style.opacity = "0";
+
+    if (outgoingImg)
+        outgoingImg.classList.add("reveal-instant");
+
+    void incomingImg.offsetWidth;
+
+    incomingImg.classList.remove("reveal-instant");
+
+    if (outgoingImg)
+        outgoingImg.classList.remove("reveal-instant");
+
+    requestAnimationFrame(() => {
+
+        incomingImg.style.opacity = "1";
+
+        if (outgoingImg)
+            outgoingImg.style.filter = "blur(14px)";
+
+    });
+
+    setTimeout(() => {
+
+        if (outgoingImg) {
+
+            outgoingImg.style.visibility = "hidden";
+            outgoingImg.style.opacity = "0";
+
+        }
+
+    }, GRID_REVEAL_MS);
+
+}
+
+
 function stopMediumLoading() {
     mediumLoadSession++;
     mediumQueue = [];
@@ -97,8 +154,6 @@ function loadMedium(item, session) {
             if (success) {
                 item.mediumLoaded = true;
                 item.mediumFailed = false;
-                img.style.visibility = "visible";
-                img.style.opacity = "1";
 
                 thumbnail.mediumSrc = item.src;
                 thumbnail.fullSrc = getImageURLs(item.image).full;
@@ -109,9 +164,14 @@ function loadMedium(item, session) {
                 if (thumbnail.slot) {
                     const thumbImg = thumbnail.img;
                     if (thumbImg && img.src) {
-                        thumbImg.style.visibility = "hidden";
-                        thumbImg.style.opacity = "0";
+                        crossfadeGridReveal(img, thumbImg);
+                    } else {
+                        img.style.visibility = "visible";
+                        img.style.opacity = "1";
                     }
+                } else {
+                    img.style.visibility = "visible";
+                    img.style.opacity = "1";
                 }
             } else {
                 item.mediumLoaded = false;
@@ -507,12 +567,7 @@ function markMediumItemLoaded(url, image, blobURL = null) {
         if (thumbnail.slot && thumbnail.mediumImg) {
             const gridMediumImg = thumbnail.mediumImg;
             const revealMedium = () => {
-                gridMediumImg.style.visibility = "visible";
-                gridMediumImg.style.opacity = "1";
-                if (thumbnail.img) {
-                    thumbnail.img.style.visibility = "hidden";
-                    thumbnail.img.style.opacity = "0";
-                }
+                crossfadeGridReveal(gridMediumImg, thumbnail.img);
             };
             if (gridMediumImg.src === resolvedSrc && gridMediumImg.complete) {
                 revealMedium();

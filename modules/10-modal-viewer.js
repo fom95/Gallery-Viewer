@@ -8,6 +8,95 @@ async function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 	pauseThumbnailLoading();
 	stopMediumLoading();
 
+	modalOpenStartedAt =
+		performance.now();
+
+	const modalWasOpenCheck =
+		document.getElementById("modal");
+
+	const wasModalOpen =
+		!!modalWasOpenCheck &&
+		modalWasOpenCheck.style.display === "flex";
+
+	/*
+	 * Clean up any stale snapshot left over from an interrupted
+	 * previous transition before possibly creating a new one below.
+	 */
+	if (modalOutgoingClone) {
+
+		modalOutgoingClone.remove();
+
+		modalOutgoingClone =
+			null;
+
+	}
+
+	/*
+	 * Navigating to a different image while the modal is already
+	 * open (arrow keys, etc) -- snapshot whatever is currently on
+	 * screen so it can fade away independently of however the new
+	 * image ends up being revealed (see revealModalResolution() in
+	 * 09-full-image-loader.js).
+	 */
+	if (wasModalOpen) {
+
+		const activeImg =
+			(
+				displayingFull &&
+				modalImgFull &&
+				modalImgFull.style.visibility !== "hidden"
+			)
+				? modalImgFull
+				: (
+					modalImgMedium &&
+					modalImgMedium.style.visibility !== "hidden"
+				)
+					? modalImgMedium
+					: (
+						modalImgSmall &&
+						modalImgSmall.style.visibility !== "hidden"
+					)
+						? modalImgSmall
+						: null;
+
+		if (activeImg && (activeImg.currentSrc || activeImg.src)) {
+
+			const rect =
+				activeImg.getBoundingClientRect();
+
+			if (rect.width && rect.height) {
+
+				modalOutgoingClone =
+					document.createElement("img");
+
+				modalOutgoingClone.src =
+					activeImg.currentSrc || activeImg.src;
+
+				modalOutgoingClone.className =
+					"modal-nav-outgoing";
+
+				modalOutgoingClone.style.left =
+					rect.left + "px";
+
+				modalOutgoingClone.style.top =
+					rect.top + "px";
+
+				modalOutgoingClone.style.width =
+					rect.width + "px";
+
+				modalOutgoingClone.style.height =
+					rect.height + "px";
+
+				document.body.appendChild(
+					modalOutgoingClone
+				);
+
+			}
+
+		}
+
+	}
+
 	const sourceItem =
 		sourceThumb?._thumbnailItem || null;
 
@@ -161,11 +250,17 @@ async function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
     if (modalImgSmall) {
 
+        modalImgSmall.classList.remove(
+            "modal-reveal-transition");
+
         modalImgSmall.style.visibility =
             "hidden";
 
         modalImgSmall.style.opacity =
             "1";
+
+        modalImgSmall.style.filter =
+            "none";
 
         modalImgSmall.style.zIndex =
             "4";
@@ -219,6 +314,9 @@ async function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
     if (modalImgMedium) {
 
+        modalImgMedium.classList.remove(
+            "modal-reveal-transition");
+
         modalImgMedium.style.visibility =
             "hidden";
 
@@ -246,6 +344,9 @@ async function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
     }
 
     if (modalImgFull) {
+
+        modalImgFull.classList.remove(
+            "modal-reveal-transition");
 
         modalImgFull.style.visibility =
             "hidden";
@@ -495,6 +596,12 @@ async function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 
 				imgResize(modalImgMedium);
 
+				const finalWidth =
+					parseFloat(modalImgMedium.style.width) || null;
+
+				const finalHeight =
+					parseFloat(modalImgMedium.style.height) || null;
+
 				modalMediumLoaded =
 					true;
 
@@ -504,24 +611,25 @@ async function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 				modalImgMedium.dataset.showingFull =
 					"false";
 
-				modalImgMedium.style.visibility =
-					"visible";
-
 				modalImgMedium.style.opacity =
 					"1";
 
 				modalImgMedium.style.zIndex =
 					"3";
 
-				if (modalImgSmall) {
-
-					modalImgSmall.style.visibility =
-						"hidden";
-
-					modalImgSmall.style.opacity =
-						"0";
-
-				}
+				/*
+				 * revealModalResolution() decides whether this counts
+				 * as a genuine load (grow in from the thumbnail's
+				 * on-screen size, blurred) or something that was
+				 * already available (show it directly, no animation)
+				 * based on how long this openModal() call has
+				 * actually taken so far.
+				 */
+				revealModalResolution(
+					modalImgMedium,
+					finalWidth,
+					finalHeight
+				);
 
 				showMediumImage();
 
@@ -553,7 +661,57 @@ async function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
 			modalImgMedium.src =
 				url;
 
-			if (
+			/*
+			 * img.decode() resolves as a microtask once the image is
+			 * ready to paint -- for an image that's already decoded
+			 * elsewhere (e.g. this exact blob URL is currently showing
+			 * in the grid), that resolves before the browser's next
+			 * paint, so the thumbnail placeholder is swapped out
+			 * before it's ever actually shown on screen. The old
+			 * `.complete` / "load" event check couldn't guarantee
+			 * that -- "load" fires as a separate task, which is
+			 * scheduled *after* a paint has already happened, so the
+			 * thumbnail would flash even when the medium image was
+			 * sitting right there, fully decoded, the whole time.
+			 */
+			if (modalImgMedium.decode) {
+
+				modalImgMedium.decode()
+					.then(showMedium)
+					.catch(() => {
+
+						if (
+							modalImgMedium.complete &&
+							modalImgMedium.naturalWidth > 0
+						) {
+
+							showMedium();
+
+						} else {
+
+							modalImgMedium.onload =
+								() => {
+
+								modalImgMedium.onload =
+									null;
+
+								showMedium();
+
+							};
+
+							modalImgMedium.onerror =
+								() => {
+
+								modalImgMedium.onload =
+									null;
+
+							};
+
+						}
+
+					});
+
+			} else if (
 				modalImgMedium.complete &&
 				modalImgMedium.naturalWidth > 0
 			) {
@@ -770,7 +928,26 @@ async function openModal(thumbSrc, mediumSrc, fullSrc, sourceThumb) {
                 full = await resolveImageAsset(sourceItem, "full", () => isModalLoadActive(loadID));
             } catch {}
             modalFullSrc = full || medium;
-            load(medium, "medium", loadID);
+
+            /*
+             * resolveImageAsset() has already done any network fetch
+             * and caching for both `medium` and `full` above -- they
+             * are real, ready-to-use blob URLs at this point. Handing
+             * `medium` to load("medium", ...) would just re-fetch this
+             * same blob URL through the streaming/progress-bar
+             * pipeline for no reason, adding latency (and another
+             * chance for the thumbnail to flash) on top of work that's
+             * already done. Display it directly instead.
+             */
+            display(medium, true, 1);
+
+            if (full && isModalLoadActive(loadID) && modalImgFull) {
+
+                modalImgFull.src =
+                    full;
+
+            }
+
         } else if (fullSrc) {
             load(fullSrc, "full", loadID);
         } else {
@@ -800,6 +977,15 @@ function closeModal(resumeGallery = true) {
     modalRetry = null;
 
 	cancelImageLoads();
+
+	if (modalOutgoingClone) {
+
+		modalOutgoingClone.remove();
+
+		modalOutgoingClone =
+			null;
+
+	}
 
 	fullImageLoading =
 		false;

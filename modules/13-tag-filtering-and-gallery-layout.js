@@ -189,8 +189,14 @@ function calculateGalleryLayout() {
                 getComputedStyle(element).display !== "none"
         )
 
+        /*
+         * ".gallery-add-tile" is the "+ Add Image" tile appended after
+         * the album's own thumbnail slots -- it isn't a real image, but
+         * it's laid out by the same grid so it ends up as a normal tile
+         * at the end of the gallery instead of floating over the page.
+         */
         : [
-            ...gallery.querySelectorAll(".thumbnail-slot")
+            ...gallery.querySelectorAll(".thumbnail-slot, .gallery-add-tile")
         ].filter(
             element =>
                 getComputedStyle(element).display !== "none"

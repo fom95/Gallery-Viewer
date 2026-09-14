@@ -190,6 +190,15 @@ function cancelImageLoads() {
 }
 
 
+/*
+ * The browser's own back/forward buttons don't go through
+ * openAlbumWithTransition()/goBackToAlbumsWithTransition() -- they
+ * land here instead, via popstate. This wraps the same fade used
+ * everywhere else around whatever this handler decides to show, so
+ * back/forward gets the same "hide the load behind a fade" treatment.
+ * There's no flying-cover animation here, since popstate doesn't carry
+ * a reference to which thumbnail/card triggered it, only a plain fade.
+ */
 window.addEventListener("popstate", async () => {
 
         const previousTemporaryID =
@@ -203,6 +212,10 @@ window.addEventListener("popstate", async () => {
                 location.search.substring(1)
             );
 
+        closeModal();
+
+        await fadeOutCurrentView();
+
         if (
             !query
         ) {
@@ -215,9 +228,9 @@ window.addEventListener("popstate", async () => {
 
             }
 
-            closeModal();
-
             await showAlbums();
+
+            fadeInCurrentView();
 
             return;
 
@@ -250,15 +263,22 @@ window.addEventListener("popstate", async () => {
                 album
             ) {
 
-                closeModal();
+                const layoutReady =
+                    waitForAlbumLayout();
 
                 loadAlbum(album, false);
+
+                await layoutReady;
+
+                fadeInCurrentView();
 
                 return;
 
             }
 
             await showAlbums();
+
+            fadeInCurrentView();
 
             return;
 
@@ -281,15 +301,22 @@ window.addEventListener("popstate", async () => {
                 currentTemporaryAlbumID =
                     albumID;
 
-                closeModal();
+                const layoutReady =
+                    waitForAlbumLayout();
 
                 loadAlbum(album, false);
+
+                await layoutReady;
+
+                fadeInCurrentView();
 
                 return;
 
             }
 
             await showAlbums();
+
+            fadeInCurrentView();
 
             return;
 
@@ -306,9 +333,14 @@ window.addEventListener("popstate", async () => {
         const albumQuery =
             createQueryAlbum(query);
 
-        closeModal();
+        const layoutReady =
+            waitForAlbumLayout();
 
         loadAlbum(albumQuery, false);
+
+        await layoutReady;
+
+        fadeInCurrentView();
 
     }
 );
