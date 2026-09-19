@@ -399,6 +399,116 @@ function prioritizeVisibleMediums() {
 }
 
 
+/*
+ * How many Telegram medium images load at once. Raise or lower this
+ * one number to change the batch size -- everything else scales off
+ * it. Kept separate from TELEGRAM_THUMBNAIL_BATCH_SIZE (07-thumbnail-
+ * loading-pipeline.js) since medium/full images are larger and you
+ * may want a different number for them.
+ */
+const TELEGRAM_MEDIUM_BATCH_SIZE = 25;
+
+
+/*
+ * Loads every eligible medium image for a Telegram album in
+ * fixed-size batches (TELEGRAM_MEDIUM_BATCH_SIZE) instead of one at a
+ * time, using the same loadInBatches() helper the thumbnail pipeline
+ * uses. Each medium item already has its own dedicated <img> element
+ * reserved for it (unlike thumbnails, which claim from a shared pool
+ * of slots), so there's no slot-claiming race to worry about here --
+ * batches can simply run concurrently.
+ *
+ * Because this only runs after loadAllThumbnailsConcurrently() has
+ * finished (see startThumbnailLoading()/startMediumLoading()), every
+ * item that's ever going to have a loaded thumbnail already does by
+ * the time this computes its eligible list, so -- unlike
+ * processMediumQueue() -- there's no need to repeatedly recompute
+ * eligibility as more thumbnails finish loading.
+ *
+ * This is only used for Telegram-sourced albums (see
+ * startMediumLoading()) so it doesn't change behavior for linked-
+ * image albums.
+ */
+function loadAllMediumsConcurrently(session) {
+
+    mediumLoading =
+        true;
+
+    mediumQueue =
+        [];
+
+    const eligible =
+        mediumItems.filter(item => {
+
+            if (!item || item.mediumLoaded || item.mediumLoading)
+                return false;
+
+            const thumbnail =
+                thumbnailItems.find(entry => entry.index === item.index);
+
+            if (!thumbnail || !thumbnail.loaded)
+                return false;
+
+            return !!item.src || item.source === "telegram";
+
+        });
+
+    loadInBatches(
+        eligible,
+        TELEGRAM_MEDIUM_BATCH_SIZE,
+        item => loadMedium(item, session),
+        () => session === mediumLoadSession
+    ).then(() => {
+
+        mediumLoading =
+            false;
+
+        if (session !== mediumLoadSession)
+            return;
+
+        const failed =
+            mediumItems.some(
+                item =>
+                    item &&
+                    !item.mediumLoaded &&
+                    item.mediumFailed
+            );
+
+        if (failed) {
+
+            imageRetryPending =
+                true;
+
+            scheduleImageRetry();
+
+            /*
+             * Do not resolve the completion promise.
+             *
+             * A temporary Telegram album is not considered complete
+             * until every image has successfully loaded and had its
+             * XMP processed.
+             */
+            return;
+
+        }
+
+        if (mediumCompletionResolve) {
+
+            const resolve =
+                mediumCompletionResolve;
+
+            mediumCompletionResolve =
+                null;
+
+            resolve();
+
+        }
+
+    });
+
+}
+
+
 function startMediumLoading() {
 
     if (mediumLoading)
@@ -432,14 +542,26 @@ function startMediumLoading() {
 
         });
 
-    rebuildMediumQueue(
-        false,
-        true
-    );
+    const isTelegramAlbum =
+        typeof currentAlbum?.url === "string" &&
+        currentAlbum.url.startsWith("tg://chat/");
 
-    processMediumQueue(
-        session
-    );
+    if (isTelegramAlbum) {
+
+        loadAllMediumsConcurrently(session);
+
+    } else {
+
+        rebuildMediumQueue(
+            false,
+            true
+        );
+
+        processMediumQueue(
+            session
+        );
+
+    }
 }
 
 function waitForMediumLoading() {

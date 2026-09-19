@@ -7,8 +7,6 @@
  * point for adding new import sources later.
  */
 
-const TELEGRAM_MEDIA_SERVER =
-    "https://private-http-test.onrender.com";
 const imageAssetCache = new WeakMap();
 
 const imageResponseCacheName = "gallery-image-assets-v1";
@@ -19,6 +17,205 @@ const telegramDownloadFailures =
 const telegramFullCacheStateKey =
     "telegramFullImageCacheState-v1";
 
+async function downloadTelegramRaw(fileID, options = {}) {
+
+    if (
+        !fileID ||
+        !window.telegramClient
+    ) {
+        throw new Error(
+            "Telegram client or file ID is unavailable."
+        );
+    }
+
+    if (!window.__galleryMTKrutoModule) {
+
+        window.__galleryMTKrutoModule =
+            import(
+                "https://esm.sh/@mtkruto/browser@0.217.0"
+            );
+
+    }
+
+    const mtkruto =
+        await window.__galleryMTKrutoModule;
+
+    const decoded =
+        mtkruto.deserializeFileId(fileID);
+
+    if (
+        !decoded ||
+        !decoded.location
+    ) {
+        throw new Error(
+            "Telegram file ID could not be decoded."
+        );
+    }
+
+    let location;
+
+    if (
+        decoded.location.type === "common"
+    ) {
+
+        location = {
+
+            _:
+                "inputDocumentFileLocation",
+
+            id:
+                decoded.location.id,
+
+            access_hash:
+                decoded.location.accessHash,
+
+            file_reference:
+                decoded.fileReference ||
+                new Uint8Array(),
+
+            thumb_size:
+                ""
+
+        };
+
+    }
+    else if (
+        decoded.location.type === "photo"
+    ) {
+
+        location = {
+
+            _:
+                "inputPhotoFileLocation",
+
+            id:
+                decoded.location.id,
+
+            access_hash:
+                decoded.location.accessHash,
+
+            file_reference:
+                decoded.fileReference ||
+                new Uint8Array(),
+
+            thumb_size:
+                decoded.location.thumbSize ||
+                decoded.location.thumb_size ||
+                ""
+
+        };
+
+    }
+    else {
+
+        throw new Error(
+            "Unsupported Telegram file location: " +
+            decoded.location.type
+        );
+
+    }
+
+    return downloadTelegramLocationRaw(
+        location,
+        options
+    );
+}
+
+async function downloadTelegramLocationRaw(
+    location,
+    options = {}
+) {
+
+    if (
+        !location ||
+        !window.telegramClient
+    ) {
+
+        throw new Error(
+            "Telegram client or file location is unavailable."
+        );
+
+    }
+
+    const chunkSize =
+        options.chunkSize ||
+        256 * 1024;
+
+    const limit =
+        Math.max(
+            1024,
+            Math.floor(
+                chunkSize / 1024
+            ) * 1024
+        );
+
+    const chunks =
+        [];
+
+    let offset =
+        0n;
+
+    while (true) {
+
+        const result =
+            await window.telegramClient.invoke({
+
+                _:
+                    "upload.getFile",
+
+                location,
+
+                offset,
+
+                limit
+
+            });
+
+        if (
+            result?._ !== "upload.file"
+        ) {
+
+            throw new Error(
+                "Telegram returned an unexpected file response."
+            );
+
+        }
+
+        const bytes =
+            result.bytes;
+
+        if (
+            !bytes ||
+            !bytes.byteLength
+        ) {
+
+            break;
+
+        }
+
+        chunks.push(
+            bytes
+        );
+
+        offset +=
+            BigInt(
+                bytes.byteLength
+            );
+
+        if (
+            bytes.byteLength <
+            limit
+        ) {
+
+            break;
+
+        }
+
+    }
+
+    return chunks;
+}
+
 async function blobURLFromResponse(response, assets, key) {
     if (!response || !response.ok)
         return null;
@@ -26,6 +223,184 @@ async function blobURLFromResponse(response, assets, key) {
     const url = URL.createObjectURL(blob);
     assets[key] = url;
     return url;
+}
+
+
+/*
+ * How many parallel byte-range requests to split a linked (non-
+ * Telegram) image download into. Raise or lower this one number to
+ * tune it.
+ */
+const RANGED_DOWNLOAD_PARTS = 5;
+
+
+/*
+ * Downloads a URL as several concurrent HTTP range requests instead of
+ * one plain GET, for hosts (like imgbb) that serve range requests fast
+ * enough that splitting the download into parallel pieces beats a
+ * single connection. Falls back to a plain fetch in resolveCachedURL()
+ * below if this fails for any reason (server doesn't support ranges,
+ * CORS blocks the HEAD request, a range comes back the wrong size,
+ * etc) -- this is strictly an optional fast path, never the only way
+ * an image can load.
+ */
+async function downloadByRanges(
+    url,
+    {
+        parts = RANGED_DOWNLOAD_PARTS,
+        cache = "default",
+        headers = {},
+        timeout = 60000,
+        verifyRanges = true
+    } = {}
+) {
+    if (!url)
+        throw new Error("URL is required.");
+
+    parts = Math.max(1, Math.floor(parts));
+
+    const fetchRange = async (start, end) => {
+        const controller = new AbortController();
+
+        const timer = setTimeout(
+            () => controller.abort(),
+            timeout
+        );
+
+        try {
+            const response = await fetch(url, {
+                cache,
+                headers: {
+                    ...headers,
+                    Range: `bytes=${start}-${end}`
+                },
+                signal: controller.signal
+            });
+
+            if (response.status !== 206)
+                throw new Error(
+                    `Expected HTTP 206, got HTTP ${response.status}`
+                );
+
+            const reader = response.body.getReader();
+
+            const chunks = [];
+            let size = 0;
+
+            for (;;) {
+                const {done, value} =
+                    await reader.read();
+
+                if (done)
+                    break;
+
+                chunks.push(value);
+                size += value.byteLength;
+            }
+
+            return {
+                chunks,
+                size
+            };
+        } finally {
+            clearTimeout(timer);
+        }
+    };
+
+    const head = await fetch(url, {
+        method: "HEAD",
+        cache,
+        headers
+    });
+
+    if (!head.ok)
+        throw new Error(
+            `HEAD request failed: HTTP ${head.status}`
+        );
+
+    const total = Number(
+        head.headers.get("content-length")
+    );
+
+    if (!Number.isFinite(total) || total <= 0)
+        throw new Error(
+            "Server did not provide a usable Content-Length."
+        );
+
+    const contentType =
+        head.headers.get("content-type") ||
+        "application/octet-stream";
+
+    const buffer = new ArrayBuffer(total);
+    const target = new Uint8Array(buffer);
+
+    const ranges = Array.from(
+        {length: parts},
+        (_, i) => {
+            const start =
+                Math.floor(i * total / parts);
+
+            const end =
+                i === parts - 1
+                    ? total - 1
+                    : Math.floor(
+                        (i + 1) * total / parts
+                    ) - 1;
+
+            return {
+                start,
+                end,
+                size: end - start + 1
+            };
+        }
+    );
+
+    const results = await Promise.all(
+        ranges.map(range =>
+            fetchRange(
+                range.start,
+                range.end
+            )
+        )
+    );
+
+    results.forEach((result, i) => {
+        const range = ranges[i];
+
+        if (
+            verifyRanges &&
+            result.size !== range.size
+        ) {
+            throw new Error(
+                `Range ${i + 1} size mismatch: ` +
+                `${result.size} received, ` +
+                `${range.size} expected`
+            );
+        }
+
+        let position = range.start;
+
+        for (const chunk of result.chunks) {
+            target.set(chunk, position);
+            position += chunk.byteLength;
+        }
+
+        if (
+            verifyRanges &&
+            position !== range.end + 1
+        ) {
+            throw new Error(
+                `Range ${i + 1} ended at ` +
+                `${position - 1}, expected ` +
+                `${range.end}`
+            );
+        }
+    });
+
+    return new Blob(
+        [buffer],
+        {type: contentType}
+    );
 }
 
 
@@ -59,30 +434,63 @@ async function resolveCachedURL(url, image, resolution, isActive) {
         });
     }
 
-    let response;
+    let response = null;
+
+    /*
+     * Try the parallel ranged download first -- this is the whole
+     * point of this fast path. Any failure here (unsupported ranges,
+     * a HEAD request that gets blocked, a size mismatch, a timeout)
+     * just falls through to the plain fetch below rather than
+     * breaking the image.
+     */
     try {
-        response = await fetch(url, {cache: "force-cache"});
+        const blob = await downloadByRanges(url);
+
+        response = new Response(blob, {
+            headers: {
+                "Content-Type": blob.type || "application/octet-stream"
+            }
+        });
+
     } catch (error) {
-        console.debug("[IMAGE FETCH] Fetch failed", {
+        console.debug("[IMAGE FETCH] Ranged download failed; falling back to a plain fetch", {
             resolution,
             url,
             errorName: error?.name,
             errorMessage: error?.message
         });
-        return null;
     }
 
     if (isActive && !isActive())
         return null;
 
-    if (!response.ok) {
-        console.debug("[IMAGE FETCH] Server returned an error", {
-            resolution,
-            url,
-            status: response.status,
-            statusText: response.statusText
-        });
-        return null;
+    if (!response) {
+
+        try {
+            response = await fetch(url, {cache: "force-cache"});
+        } catch (error) {
+            console.debug("[IMAGE FETCH] Fetch failed", {
+                resolution,
+                url,
+                errorName: error?.name,
+                errorMessage: error?.message
+            });
+            return null;
+        }
+
+        if (isActive && !isActive())
+            return null;
+
+        if (!response.ok) {
+            console.debug("[IMAGE FETCH] Server returned an error", {
+                resolution,
+                url,
+                status: response.status,
+                statusText: response.statusText
+            });
+            return null;
+        }
+
     }
 
     try {
@@ -109,6 +517,264 @@ async function resolveCachedURL(url, image, resolution, isActive) {
     }
 }
 
+async function refreshTelegramThumbnailFileID(image) {
+
+    if (
+        !image ||
+        !window.telegramClient ||
+        image.telegramChatID == null ||
+        image.messageID == null
+    ) {
+
+        return null;
+
+    }
+
+    const client =
+        window.telegramClient;
+
+
+    /*
+     * MTKruto's normal getMessages() already works for this
+     * channel. We therefore use its entity-aware input peer
+     * and convert the resulting inputPeerChannel into the
+     * inputChannel constructor required by channels.getMessages.
+     */
+
+    const inputChannel =
+		await client.getInputChannel(
+			image.telegramChatID
+		);
+
+
+    const result =
+		await client.invoke({
+			_: "channels.getMessages",
+			channel: inputChannel,
+			id: [
+				{
+					_: "inputMessageID",
+					id: Number(image.messageID)
+				}
+			]
+		});
+
+
+    if (
+        !result ||
+        !Array.isArray(result.messages) ||
+        !result.messages.length
+    ) {
+
+        throw new Error(
+            "Telegram returned no message during thumbnail refresh."
+        );
+
+    }
+
+
+    const rawMessage =
+        result.messages.find(
+            message =>
+                message &&
+                Number(
+                    message.id
+                ) ===
+                Number(
+                    image.messageID
+                )
+        );
+
+
+    if (!rawMessage) {
+
+        throw new Error(
+            "Telegram did not return the requested message."
+        );
+
+    }
+
+
+    /*
+     * This album contains documents.
+     */
+
+    const rawDocument =
+        rawMessage.media?._ ===
+            "messageMediaDocument" &&
+        rawMessage.media.document?._ ===
+            "document"
+            ? rawMessage.media.document
+            : null;
+
+
+    if (!rawDocument) {
+
+        throw new Error(
+            "Telegram message does not contain a raw document."
+        );
+
+    }
+
+
+    /*
+     * Telegram calls these "thumbs" in the raw document
+     * structure. They are the actual generated thumbnails
+     * belonging to the document.
+     */
+
+    const thumbs =
+        Array.isArray(
+            rawDocument.thumbs
+        )
+            ? rawDocument.thumbs
+            : [];
+
+
+    if (!thumbs.length) {
+
+        throw new Error(
+            "Telegram document contains no thumbnails."
+        );
+
+    }
+
+
+    const usableThumbs =
+        thumbs.filter(
+            thumb =>
+                thumb &&
+                (
+                    thumb._ ===
+                        "photoSize" ||
+                    thumb._ ===
+                        "photoCachedSize"
+                )
+        );
+
+
+    if (!usableThumbs.length) {
+
+        throw new Error(
+            "Telegram document contains no usable thumbnails."
+        );
+
+    }
+
+
+    const smallest =
+        usableThumbs
+            .slice()
+            .sort(
+                (a, b) =>
+                    (
+                        (a.w || 0) *
+                        (a.h || 0)
+                    ) -
+                    (
+                        (b.w || 0) *
+                        (b.h || 0)
+                    )
+            )[0];
+
+
+    /*
+     * photoCachedSize already contains the thumbnail bytes
+     * in the Telegram response. There is nothing to download.
+     */
+
+    if (
+        smallest._ ===
+            "photoCachedSize"
+    ) {
+
+        if (
+            smallest.bytes &&
+            smallest.bytes.byteLength
+        ) {
+
+            return {
+
+                type:
+                    "cached",
+
+                bytes:
+                    smallest.bytes,
+
+                width:
+                    smallest.w,
+
+                height:
+                    smallest.h,
+
+                thumbSize:
+                    smallest.type ||
+                    ""
+
+            };
+
+        }
+
+    }
+
+
+    /*
+     * Normal photoSize thumbnails must be downloaded through
+     * inputDocumentFileLocation.
+     */
+
+    if (
+        !rawDocument.file_reference
+    ) {
+
+        throw new Error(
+            "Telegram document has no current file reference."
+        );
+
+    }
+
+
+    const location = {
+
+        _:
+            "inputDocumentFileLocation",
+
+        id:
+            rawDocument.id,
+
+        access_hash:
+            rawDocument.access_hash,
+
+        file_reference:
+            rawDocument.file_reference,
+
+        thumb_size:
+            smallest.type ||
+            ""
+
+    };
+
+
+    return {
+
+        type:
+            "location",
+
+        location,
+
+        width:
+            smallest.w,
+
+        height:
+            smallest.h,
+
+        thumbSize:
+            smallest.type ||
+            ""
+
+    };
+}
+
 const imageSources = {
     url: {
         resolve: async (image, resolution, isActive) =>
@@ -121,56 +787,520 @@ const imageSources = {
     },
 
     telegram: {
-		resolve: async (
-			image,
-			resolution,
-			isActive
-		) => {
+        resolve: async (
+            image,
+            resolution,
+            isActive
+        ) => {
 
-			const key =
-				resolution === "thumb"
-					? "thumb"
-					: "full";
+            const key =
+                resolution === "thumb"
+                    ? "thumb"
+                    : "full";
 
-			let assets =
-				imageAssetCache.get(image);
+            let assets =
+                imageAssetCache.get(image);
 
-			if (!assets) {
+            if (!assets) {
 
-				assets = {};
+                assets = {};
 
-				imageAssetCache.set(
-					image,
-					assets
-				);
+                imageAssetCache.set(
+                    image,
+                    assets
+                );
 
-			}
+            }
 
-			if (assets[key])
-				return assets[key];
+            if (assets[key])
+                return assets[key];
 
-			const url =
-				getTelegramMediaURL(
-					image,
-					resolution
-				);
+            const fileID =
+                resolution === "thumb"
+                    ? image.telegramThumbnailFileID
+                    : image.telegramFileID;
 
-			if (!url)
-				return null;
+            if (
+                !fileID ||
+                !window.telegramClient
+            ) {
 
-			if (
-				isActive &&
-				!isActive()
-			) {
-				return null;
-			}
+                return null;
 
-			assets[key] =
-				url;
+            }
 
-			return url;
-		}
-	}
+            let failureState =
+                telegramDownloadFailures.get(
+                    image
+                );
+
+            if (!failureState) {
+
+                failureState = {};
+
+                telegramDownloadFailures.set(
+                    image,
+                    failureState
+                );
+
+            }
+
+            if (
+                failureState[key] &&
+                failureState[key].fileID === fileID
+            ) {
+
+                return null;
+
+            }
+
+            /*
+             * Telegram thumbnails have one persistent cache namespace.
+             *
+             * Telegram full images are persistent only for the current
+             * album and the immediately previous album.
+             */
+            let cacheKey = null;
+            let persistentFullCache = false;
+
+            if (key === "thumb") {
+
+                cacheKey =
+                    `https://gallery-image.invalid/telegram/` +
+                    `${encodeURIComponent(fileID)}/thumb`;
+
+            }
+            else {
+
+                const albumID =
+                    currentAlbum?.id;
+
+                if (albumID) {
+
+                    let state = null;
+
+                    try {
+
+                        const stored =
+                            localStorage.getItem(
+                                telegramFullCacheStateKey
+                            );
+
+                        if (stored)
+                            state =
+                                JSON.parse(stored);
+
+                    }
+                    catch (error) {
+
+                        console.debug(
+                            "[TELEGRAM CACHE] Failed to read full-cache state",
+                            {
+                                errorName:
+                                    error?.name,
+
+                                errorMessage:
+                                    error?.message
+                            }
+                        );
+
+                    }
+
+                    const albumIDString =
+                        String(albumID);
+
+                    if (
+                        state &&
+                        (
+                            String(state.current || "") ===
+                                albumIDString ||
+                            String(state.previous || "") ===
+                                albumIDString
+                        )
+                    ) {
+
+                        persistentFullCache = true;
+
+                        cacheKey =
+                            `https://gallery-image.invalid/telegram/full/` +
+                            `${encodeURIComponent(albumIDString)}/` +
+                            `${encodeURIComponent(fileID)}`;
+
+                    }
+
+                }
+
+            }
+
+            /*
+             * Persistent cache lookup.
+             */
+            if (
+                cacheKey &&
+                (
+                    key === "thumb" ||
+                    persistentFullCache
+                )
+            ) {
+
+                try {
+
+                    if (window.caches) {
+
+                        const cache =
+                            await caches.open(
+                                imageResponseCacheName
+                            );
+
+                        const cached =
+                            await cache.match(
+                                cacheKey
+                            );
+
+                        if (cached) {
+
+                            return blobURLFromResponse(
+                                cached,
+                                assets,
+                                key
+                            );
+
+                        }
+
+                    }
+
+                }
+                catch (error) {
+
+                    console.debug(
+                        "[TELEGRAM CACHE] Cache lookup failed",
+                        {
+                            key,
+                            fileID,
+                            errorName:
+                                error?.name,
+                            errorMessage:
+                                error?.message
+                        }
+                    );
+
+                }
+
+            }
+
+            let chunks;
+
+            try {
+
+                if (key === "thumb") {
+
+                    const refreshed =
+                        await refreshTelegramThumbnailFileID(
+                            image
+                        );
+
+                    if (
+                        refreshed?.type ===
+                        "cached"
+                    ) {
+
+                        chunks = [
+                            refreshed.bytes
+                        ];
+
+                    }
+                    else if (
+                        refreshed?.type ===
+                        "location"
+                    ) {
+
+                        chunks =
+                            await downloadTelegramLocationRaw(
+                                refreshed.location,
+                                {
+                                    chunkSize:
+                                        64 * 1024
+                                }
+                            );
+
+                    }
+                    else {
+
+                        throw new Error(
+                            "Telegram thumbnail refresh returned no usable thumbnail."
+                        );
+
+                    }
+
+                }
+                else {
+
+                    chunks =
+                        await downloadTelegramRaw(
+                            fileID,
+                            {
+                                chunkSize:
+                                    256 * 1024
+                            }
+                        );
+
+                }
+
+            }
+            catch (error) {
+
+                console.debug(
+                    "[TELEGRAM DOWNLOAD] Raw download failed",
+                    {
+                        key,
+                        fileID,
+                        messageID:
+                            image.messageID,
+                        errorName:
+                            error?.name,
+                        errorMessage:
+                            error?.message,
+                        error
+                    }
+                );
+
+                failureState[key] = {
+                    fileID,
+                    error
+                };
+
+                return null;
+
+            }
+
+            if (
+                isActive &&
+                !isActive()
+            ) {
+
+                return null;
+
+            }
+
+            const totalBytes =
+                chunks.reduce(
+                    (total, chunk) =>
+                        total +
+                        chunk.byteLength,
+                    0
+                );
+
+            if (!totalBytes) {
+
+                failureState[key] = {
+                    fileID,
+                    error:
+                        new Error(
+                            "Telegram returned an empty file."
+                        )
+                };
+
+                console.debug(
+                    "[TELEGRAM DOWNLOAD] Empty file returned",
+                    {
+                        key,
+                        fileID
+                    }
+                );
+
+                return null;
+
+            }
+
+            delete failureState[key];
+
+            const blob =
+                new Blob(
+                    chunks,
+                    {
+                        type:
+                            image.mimeType ||
+                            "image/jpeg"
+                    }
+                );
+
+            /*
+             * Temporary Telegram albums use the original full-size
+             * download for their one-time XMP extraction.
+             *
+             * The Blob already contains the exact original bytes
+             * that are about to be displayed, so this does not
+             * perform another Telegram download.
+             */
+            if (
+                key === "full" &&
+                currentAlbum?.temporary &&
+                !image._telegramXMPProcessed
+            ) {
+
+                try {
+
+                    const buffer =
+                        await blob.arrayBuffer();
+
+                    const metadata =
+                        await getTelegramXMPMetadata(
+                            buffer
+                        );
+
+                    const tags =
+                        [];
+
+                    const seen =
+                        new Set();
+
+                    for (
+                        const tag of
+                        Array.isArray(
+                            metadata?.xmptags?.subject
+                        )
+                            ? metadata.xmptags.subject
+                            : []
+                    ) {
+
+                        if (
+                            typeof tag !==
+                            "string"
+                        ) {
+
+                            continue;
+
+                        }
+
+                        const clean =
+                            tag.trim();
+
+                        if (!clean) {
+                            continue;
+                        }
+
+                        const normalized =
+                            clean.toLowerCase();
+
+                        if (
+                            seen.has(
+                                normalized
+                            )
+                        ) {
+
+                            continue;
+
+                        }
+
+                        seen.add(
+                            normalized
+                        );
+
+                        tags.push(
+                            clean
+                        );
+
+                    }
+
+                    image.tags =
+						tags;
+
+					updateTelegramImageTagsLive(
+						image
+					);
+
+					image._telegramXMPProcessed =
+						true;
+
+					console.log(
+						"[Telegram XMP]",
+						image.messageID,
+						image.fileName,
+						image.tags
+					);
+
+                }
+                catch (error) {
+
+                    console.warn(
+                        "Failed to parse XMP from Telegram message " +
+                        image.messageID,
+                        error
+                    );
+
+                }
+
+            }
+
+            const url =
+                URL.createObjectURL(
+                    blob
+                );
+
+            assets[key] =
+                url;
+
+            /*
+             * Persist:
+             *
+             * - every Telegram thumbnail
+             * - full images only for the current/previous albums
+             */
+            if (
+                cacheKey &&
+                (
+                    key === "thumb" ||
+                    persistentFullCache
+                )
+            ) {
+
+                try {
+
+                    if (window.caches) {
+
+                        const cache =
+                            await caches.open(
+                                imageResponseCacheName
+                            );
+
+                        await cache.put(
+                            cacheKey,
+                            new Response(
+                                blob,
+                                {
+                                    headers: {
+                                        "Content-Type":
+                                            blob.type ||
+                                            "image/jpeg"
+                                    }
+                                }
+                            )
+                        );
+
+                    }
+
+                }
+                catch (error) {
+
+                    console.debug(
+                        "[TELEGRAM CACHE] Cache store failed",
+                        {
+                            key,
+                            fileID,
+                            errorName:
+                                error?.name,
+                            errorMessage:
+                                error?.message
+                        }
+                    );
+
+                }
+
+            }
+
+            return url;
+        }
+    }
 };
 
 async function resolveImageAsset(item, resolution, isActive) {
@@ -467,24 +1597,4 @@ async function updateTelegramFullCacheAlbums(albumID) {
 
     }
 
-}
-
-function getTelegramMediaURL(image, resolution) {
-
-    if (
-        !image ||
-        image.telegramChatID == null ||
-        image.messageID == null
-    ) {
-        return null;
-    }
-
-    const base =
-        `${TELEGRAM_MEDIA_SERVER}/media/` +
-        `${encodeURIComponent(image.telegramChatID)}/` +
-        `${encodeURIComponent(image.messageID)}`;
-
-    return resolution === "thumb"
-        ? `${base}?thumb=1`
-        : base;
 }

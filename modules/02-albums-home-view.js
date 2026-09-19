@@ -487,40 +487,53 @@ async function showAlbums() {
             );
 
             if (
-				isTelegram &&
-				album.images &&
-				album.images.length
-			) {
+                isTelegram &&
+                window.telegramClient
+            ) {
 
-				const cover =
-					album.images.find(
-						image =>
-							image &&
-							image.source === "telegram" &&
-							image.messageID != null
-					);
+                /*
+                 * Only fetch a Telegram cover once per album id per
+                 * session. Re-using the cached promise (instead of
+                 * calling loadTelegramAlbumCover() again) is what
+                 * keeps the randomly-chosen cover stable across
+                 * repeated visits to the home page.
+                 */
+                if (!homeCoverCache.has(album.id)) {
 
-				if (cover) {
+                    homeCoverCache.set(
+                        album.id,
+                        loadTelegramAlbumCover(album)
+                    );
 
-					const url =
-						getTelegramMediaURL(
-							cover,
-							"thumb"
-						);
+                }
 
-					if (url) {
+                album._telegramCoverPromise =
+                    homeCoverCache.get(album.id);
 
-						img.src =
-							url;
+                album._telegramCoverPromise
+                    .then(
+                        result => {
 
-						img.style.visibility =
-							"visible";
+                            img.src =
+                                result.url;
 
-					}
+                            img.style.visibility =
+                                "visible";
 
-				}
+                        }
+                    )
+                    .catch(
+                        error => {
 
-			}
+                            console.error(
+                                "[TELEGRAM COVER FAILED]",
+                                error
+                            );
+
+                        }
+                    );
+
+            }
 
         }
     );

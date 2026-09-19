@@ -462,6 +462,48 @@ function flyCoverTo(clone, targetEl, settle) {
 /*
  * Home page -> album.
  */
+/*
+ * Most Telegram album URLs already carry an explicit "cover=<id>"
+ * parameter (see openTemporaryTelegramAlbum() and the album-export
+ * flows in 02-albums-home-view.js) -- when it's there, this is a
+ * synchronous, always-correct way to know the cover's messageID
+ * without waiting on anything at all. The only albums without one are
+ * ones saved via the save button, which deliberately strips it so a
+ * fresh random cover gets picked each session (see saveCurrentAlbum()
+ * in 18-reload-albums-and-persistence.js) -- those still fall back to
+ * awaiting homeCoverCache's promise.
+ */
+function parseTelegramCoverMessageID(url) {
+
+    if (typeof url !== "string")
+        return null;
+
+    const match =
+        /[?&]cover=([^&]+)/.exec(url);
+
+    if (!match)
+        return null;
+
+    let raw =
+        match[1];
+
+    try {
+
+        raw =
+            decodeURIComponent(raw);
+
+    } catch {}
+
+    const parsed =
+        Number(raw);
+
+    return Number.isFinite(parsed)
+        ? parsed
+        : null;
+
+}
+
+
 async function openAlbumWithTransition(album, coverImgEl) {
 
     const isTelegram =
@@ -471,22 +513,56 @@ async function openAlbumWithTransition(album, coverImgEl) {
     const clone =
         createCoverFlight(coverImgEl);
 
-    let coverMessageID = null;
+    let coverMessageID =
+        isTelegram
+            ? parseTelegramCoverMessageID(album.url)
+            : null;
+
     let coverImageObject = null;
 
-    if (isTelegram) {
+    /*
+     * Figuring out which image in the album corresponds to the home
+     * page's cover can mean waiting on a real Telegram network call
+     * (resolving homeCoverCache's promise) -- so this runs
+     * concurrently with the fade-out below instead of blocking it.
+     * Blocking it meant the user saw nothing happen at all until this
+     * settled, and a hard 600ms cutoff meant any real network delay
+     * silently dropped the flying-cover animation entirely, which is
+     * exactly why it never seemed to work for Telegram albums. The
+     * timeout here is just a safety net against a call that never
+     * resolves at all, not the normal path.
+     *
+     * This whole lookup is skipped when parseTelegramCoverMessageID()
+     * above already found an explicit cover in the URL -- no need to
+     * touch the network at all in that (common) case.
+     */
+    const coverIDPromise =
+        (async () => {
 
-        const cached =
-            homeCoverCache.get(album.id);
+            if (!isTelegram) {
 
-        if (cached) {
+                coverImageObject =
+                    homeCoverCache.get(album.id) || null;
+
+                return;
+
+            }
+
+            if (coverMessageID != null)
+                return;
+
+            const cached =
+                homeCoverCache.get(album.id);
+
+            if (!cached)
+                return;
 
             try {
 
                 const result =
                     await Promise.race([
                         cached,
-                        sleep(600).then(() => null)
+                        sleep(10000).then(() => null)
                     ]);
 
                 if (result && result.messageID != null)
@@ -494,17 +570,12 @@ async function openAlbumWithTransition(album, coverImgEl) {
 
             } catch {}
 
-        }
+        })();
 
-    }
-    else {
-
-        coverImageObject =
-            homeCoverCache.get(album.id) || null;
-
-    }
-
-    await fadeOutCurrentView();
+    await Promise.all([
+        fadeOutCurrentView(),
+        coverIDPromise
+    ]);
 
     const layoutReady =
         waitForAlbumLayout();
@@ -533,6 +604,25 @@ async function openAlbumWithTransition(album, coverImgEl) {
 
     if (targetIndex === -1)
         targetIndex = null;
+
+    /*
+     * Couldn't pin down the exact cover image (e.g. the message
+     * disappeared from the chat between the home page and now, or the
+     * cover promise failed) -- fly to the first image instead of
+     * silently skipping the animation. This keeps the "lands near
+     * where the album actually starts" behavior even in that edge
+     * case, rather than the clone just vanishing and the album
+     * defaulting to the very top with no transition at all.
+     */
+    if (
+        targetIndex == null &&
+        loadedAlbum.images &&
+        loadedAlbum.images.length
+    ) {
+
+        targetIndex = 0;
+
+    }
 
     /*
      * Remembered so the reverse (album -> home) transition knows which
