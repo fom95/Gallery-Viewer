@@ -585,20 +585,34 @@ async function openAlbumWithTransition(album, coverImgEl) {
     const loadedAlbum =
         await layoutReady;
 
+    const loadedImages =
+        loadedAlbum._imagesArray || buildImagesArray(loadedAlbum);
+
     let targetIndex = null;
 
     if (isTelegram && coverMessageID != null) {
 
         targetIndex =
-            (loadedAlbum.images || []).findIndex(
-                image => image.messageID === coverMessageID
+            loadedImages.findIndex(
+                image => {
+
+                    const telegramSource =
+                        image?.[0];
+
+                    return (
+                        telegramSource &&
+                        String(telegramSource.full?.key2) ===
+                            String(coverMessageID)
+                    );
+
+                }
             );
 
     }
     else if (coverImageObject) {
 
         targetIndex =
-            (loadedAlbum.images || []).indexOf(coverImageObject);
+            loadedImages.indexOf(coverImageObject);
 
     }
 
@@ -616,8 +630,7 @@ async function openAlbumWithTransition(album, coverImgEl) {
      */
     if (
         targetIndex == null &&
-        loadedAlbum.images &&
-        loadedAlbum.images.length
+        loadedImages.length
     ) {
 
         targetIndex = 0;

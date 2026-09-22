@@ -1,64 +1,161 @@
 /*
  * 18-reload-albums-and-persistence.js
  *
- * Loads albums from every configured source (manual list, GitHub-hosted
- * list, localStorage) and saves edits back to storage.
+ * Loads albums from siteConfig.album (a .txt of newline-separated
+ * compressed album blobs -- see 00b-config-and-providers.js) plus
+ * anything saved locally, and saves edits back to storage. Every
+ * album read from either source is decompressed on the way in; every
+ * album written back out is compressed on the way out.
  */
+
+const SAVED_ALBUMS_STORAGE_KEY =
+    "savedAlbums";
+
+
+/*
+ * Reads the raw, still-compressed saved-album strings straight out of
+ * localStorage, with no decompression -- used when only the count or
+ * an unresolved copy is needed.
+ */
+function getSavedAlbumsRaw() {
+
+    try {
+
+        const parsed =
+            JSON.parse(
+                localStorage.getItem(SAVED_ALBUMS_STORAGE_KEY) || "[]"
+            );
+
+        return Array.isArray(parsed) ? parsed : [];
+
+    } catch {
+
+        return [];
+
+    }
+
+}
+
+
+/*
+ * Decompresses every saved album. Anything that fails to decompress
+ * (corrupted entry, format change, etc) is skipped rather than
+ * breaking the whole list.
+ */
+async function getSavedAlbums() {
+
+    const raw =
+        getSavedAlbumsRaw();
+
+    const albums =
+        [];
+
+    for (const entry of raw) {
+
+        try {
+
+            albums.push(
+                await decompressAlbum(entry)
+            );
+
+        } catch (error) {
+
+            console.debug(
+                "[ALBUMS] Failed to decompress a saved album",
+                {
+                    errorName: error?.name,
+                    errorMessage: error?.message
+                }
+            );
+
+        }
+
+    }
+
+    return albums;
+
+}
+
+
+/*
+ * Compresses and writes back the full saved-albums list in one go.
+ */
+async function setSavedAlbums(albumObjects) {
+
+    const compressed =
+        [];
+
+    for (const album of albumObjects) {
+
+        compressed.push(
+            await compressAlbum(album)
+        );
+
+    }
+
+    localStorage.setItem(
+        SAVED_ALBUMS_STORAGE_KEY,
+        JSON.stringify(compressed)
+    );
+
+}
+
+
+/*
+ * Parses a .txt response body as newline-separated compressed album
+ * blobs (blank lines ignored) and decompresses each one.
+ */
+async function parseAlbumsText(text) {
+
+    const lines =
+        text
+            .split("\n")
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+
+    const parsed =
+        [];
+
+    for (const line of lines) {
+
+        try {
+
+            parsed.push(
+                await decompressAlbum(line)
+            );
+
+        } catch (error) {
+
+            console.debug(
+                "[ALBUMS] Failed to decompress an album from the album list",
+                {
+                    errorName: error?.name,
+                    errorMessage: error?.message
+                }
+            );
+
+        }
+
+    }
+
+    return parsed;
+
+}
+
 
 async function reloadAlbums() {
 
     albums.length = 0;
 
-    const GITHUB_STORAGE_KEY =
-        "githubID";
+    let remoteAlbums =
+        [];
 
-    const query =
-        window.location.search.substring(1);
-
-    let pasteID =
-        null;
-
-    if (
-        query.startsWith("@")
-    ) {
-
-        pasteID =
-            decodeBase64URL(
-                query.substring(1)
-            );
-
-        if (
-            !pasteID
-        ) {
-
-            pasteID =
-                null;
-
-        }
-        else {
-
-            localStorage.setItem(GITHUB_STORAGE_KEY,
-                pasteID);
-
-        }
-
-    }
-
-    else {
-
-        pasteID =
-            localStorage.getItem(GITHUB_STORAGE_KEY);
-
-    }
-
-    let manualAlbums = [];
-
-    if (pasteID) {
+    if (siteConfig?.album) {
 
         try {
 
             const response =
-                await fetch(pasteID);
+                await fetch(siteConfig.album);
 
             if (!response.ok) {
 
@@ -69,219 +166,48 @@ async function reloadAlbums() {
             const text =
                 await response.text();
 
-            const start =
-                text.indexOf("MANUAL_ALBUMS");
+            remoteAlbums =
+                await parseAlbumsText(text);
 
-            if (
-                start === -1
-            ) {
+        } catch (error) {
 
-                throw new Error("MANUAL_ALBUMS was not found in GitHub file.");
-
-            }
-
-            const arrayStart =
-                text.indexOf(
-                    "[",
-                    start
-                );
-
-            if (
-                arrayStart === -1
-            ) {
-
-                throw new Error("MANUAL_ALBUMS array start was not found.");
-
-            }
-
-            let depth =
-                0;
-
-            let arrayEnd =
-                -1;
-
-            let inString =
-                false;
-
-            let stringChar =
-                null;
-
-            let escaped =
-                false;
-
-            for (
-                let i = arrayStart;
-                i < text.length;
-                i++
-            ) {
-
-                const char =
-                    text[i];
-
-                if (escaped) {
-
-                    escaped =
-                        false;
-
-                    continue;
-
+            console.debug(
+                "[ALBUMS] Failed to load siteConfig.album",
+                {
+                    url: siteConfig.album,
+                    errorName: error?.name,
+                    errorMessage: error?.message
                 }
-
-                if (inString) {
-
-                    if (
-                        char === "\\"
-                    ) {
-
-                        escaped =
-                            true;
-
-                    }
-                    else if (
-                        char === stringChar
-                    ) {
-
-                        inString =
-                            false;
-
-                        stringChar =
-                            null;
-
-                    }
-
-                    continue;
-
-                }
-
-                if (
-                    char === '"' ||
-                    char === "'" ||
-                    char === "`"
-                ) {
-
-                    inString =
-                        true;
-
-                    stringChar =
-                        char;
-
-                    continue;
-
-                }
-
-                if (
-                    char === "["
-                ) {
-
-                    depth++;
-
-                }
-                else if (
-                    char === "]"
-                ) {
-
-                    depth--;
-
-                    if (
-                        depth === 0
-                    ) {
-
-                        arrayEnd =
-                            i;
-
-                        break;
-
-                    }
-
-                }
-
-            }
-
-            if (
-                arrayEnd === -1
-            ) {
-
-                throw new Error("Could not find end of MANUAL_ALBUMS.");
-
-            }
-
-            const arrayText =
-                text.substring(
-                    arrayStart,
-                    arrayEnd + 1
-                );
-
-            manualAlbums =
-                Function(
-                    `"use strict"; return (${arrayText});`
-                )();
-
-            if (
-                !Array.isArray(manualAlbums)
-            ) {
-
-                throw new Error("Extracted MANUAL_ALBUMS is not an array.");
-
-            }
-
-        }
-        catch (error) {
-
-            manualAlbums =
-                [];
+            );
 
         }
 
     }
 
-    else if (
-        typeof MANUAL_ALBUMS !==
-        "undefined"
-    ) {
+    /*
+     * MANUAL_ALBUMS, if a developer still defines it directly in a
+     * loaded script, is treated as already-decompressed album objects
+     * in the current data shape -- a manual escape hatch, not the
+     * normal path.
+     */
+    if (typeof MANUAL_ALBUMS !== "undefined") {
 
-        manualAlbums =
-            MANUAL_ALBUMS;
+        remoteAlbums =
+            remoteAlbums.concat(MANUAL_ALBUMS);
 
     }
 
-    manualAlbums.forEach(
-		album => {
+    remoteAlbums.forEach(album => {
 
-			const isTelegram =
-				typeof album.url === "string" &&
-				album.url.startsWith("tg://chat/");
+        if (!album)
+            return;
+		
+        albums.push(album);
 
-			albums.push({
-
-				id:
-					album.id,
-
-				name:
-					album.name,
-
-				images:
-					isTelegram
-						? []
-						: parseQuery(
-							getAlbumQuery(album.url)
-						),
-
-				url:
-					album.url,
-
-				tags:
-					album.tags ||
-					[]
-
-			});
-
-		}
-	);
+    });
 
     const saved =
-        JSON.parse(
-            localStorage.getItem("savedAlbums") || "[]"
-        );
+        await getSavedAlbums();
 
     saved.forEach(
         album => {
@@ -339,17 +265,10 @@ function setTelegramImportSavingState(importing) {
     button.style.cursor = importing ? "default" : "";
 }
 
-function saveCurrentAlbum() {
+async function saveCurrentAlbum() {
 
     if (!currentAlbum)
         return;
-
-    const saved =
-        JSON.parse(
-            localStorage.getItem(
-                "savedAlbums"
-            ) || "[]"
-        );
 
     const name =
 		currentAlbum.name ||
@@ -425,6 +344,9 @@ function saveCurrentAlbum() {
 		edited:
 			false,
 
+		sources:
+			currentAlbum.sources || [],
+
 		images:
 			currentAlbum.images,
 
@@ -436,47 +358,41 @@ function saveCurrentAlbum() {
 
 	};
 
+    const saved =
+        await getSavedAlbums();
+
 	saved.push(
         savedAlbum
     );
 
-    localStorage.setItem(
-        "savedAlbums",
-        JSON.stringify(saved)
-    );
+    await setSavedAlbums(saved);
 
     /*
-     * Telegram records are still copied to the clipboard
-     * for now, but no debug output is produced.
+     * Telegram records are still copied to the clipboard for
+     * convenience, now as a compressed, ready-to-paste-into-album.txt
+     * line rather than a raw JS object literal.
      */
     if (isTelegram) {
 
-        const record =
-            JSON.stringify({
-                id:
-                    savedAlbum.id,
+        try {
 
-                name:
-                    name,
+            const record =
+                await compressAlbum(savedAlbum);
 
-                url:
-                    savedAlbum.url,
+            if (
+                navigator.clipboard &&
+                navigator.clipboard.writeText
+            ) {
 
-                tags:
-                    currentAlbum.tags || []
-            });
+                navigator.clipboard
+                    .writeText(record)
+                    .catch(
+                        () => {}
+                    );
+            }
 
-        if (
-            navigator.clipboard &&
-            navigator.clipboard.writeText
-        ) {
+        } catch {}
 
-            navigator.clipboard
-                .writeText(record)
-                .catch(
-                    () => {}
-                );
-        }
     }
 
     if (currentTemporaryAlbumID) {

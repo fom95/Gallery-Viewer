@@ -10,7 +10,9 @@
  * album id. This is a plain in-memory cache (not persisted), so it
  * naturally resets on refresh but survives repeated showAlbums() calls
  * -- including the ones that rebuild "storage" album objects from
- * localStorage -- for the rest of the session.
+ * localStorage -- for the rest of the session. For Telegram albums
+ * this holds the (still-pending-or-resolved) cover promise; for
+ * everything else it holds the chosen image entry directly.
  */
 const homeCoverCache = new Map();
 
@@ -37,6 +39,9 @@ async function showAlbums() {
 
     document.getElementById("tagToggle").style.display =
         "none";
+
+    document.getElementById("settingsButton").style.display =
+        "";
 
     document.getElementById("pageName").textContent =
         "ImgBB Galleries";
@@ -80,7 +85,7 @@ async function showAlbums() {
     }
     else {
 
-        refreshSavedAlbums();
+        await refreshSavedAlbums();
 
     }
 
@@ -96,15 +101,6 @@ async function showAlbums() {
     gallery.innerHTML =
         "";
 
-    if (!albums.length) {
-
-        gallery.textContent =
-            "No data loaded.";
-
-        return;
-
-    }
-
     albums.forEach(
         album => {
 
@@ -114,23 +110,25 @@ async function showAlbums() {
                     "tg://chat/"
                 );
 
+            const images =
+                buildImagesArray(album);
+
             let cover =
                 null;
 
             if (
                 !isTelegram &&
-                album.images &&
-                album.images.length
+                images.length
             ) {
 
                 if (!homeCoverCache.has(album.id)) {
 
                     homeCoverCache.set(
                         album.id,
-                        album.images[
+                        images[
                             Math.floor(
                                 Math.random() *
-                                album.images.length
+                                images.length
                             )
                         ]
                     );
@@ -158,13 +156,14 @@ async function showAlbums() {
 
             if (
                 !isTelegram &&
-                cover &&
-                cover.thumb &&
-                cover.thumb.url
+                cover
             ) {
 
-                img.src =
-                    cover.thumb.url;
+                const coverURL =
+                    getBestGuessImageURL(album, cover, "thumb");
+
+                if (coverURL)
+                    img.src = coverURL;
 
             }
 
@@ -209,107 +208,43 @@ async function showAlbums() {
                     "↗";
 
                 exportBtn.title =
-                    "Copy Telegram album record";
+                    "Copy album.txt line";
 
                 exportBtn.onclick = async (e) => {
 					e.stopPropagation();
 
 					try {
 
-						const telegramImages =
-							(album.images || [])
-							.filter(
-								image =>
-									image &&
-									image.source === "telegram" &&
-									image.messageID != null
-							);
-
-						if (!telegramImages.length) {
+						if (!Object.keys(album.images || {}).length) {
 
 							/*
-							 * This can happen for a MANUAL_ALBUMS Telegram
-							 * record which has not yet been opened.
-							 *
-							 * Load it once so that its image records exist.
+							 * This can happen for an album record
+							 * that hasn't been opened yet and has no
+							 * pre-populated image list. Load it once
+							 * so its image records exist.
 							 */
 							await loadTelegramAlbum(album);
+							buildImagesArray(album);
 
 						}
+						
+						//set storage to false when export is meant for the txt
+						album.storage = false;
 
-						const images =
-							(album.images || [])
-							.filter(
-								image =>
-									image &&
-									image.source === "telegram" &&
-									image.messageID != null
-							);
-
-						if (!images.length) {
-
-							alert(
-								"No Telegram image messages were found."
-							);
-
-							return;
-						}
-
-						const match =
-							album.url.match(
-								/^tg:\/\/chat\/(-?\d+)/
-							);
-
-						if (!match) {
-
-							alert(
-								"Invalid Telegram album URL."
-							);
-
-							return;
-						}
-
-						const chatId =
-							match[1];
-
-						const messageIDs =
-							images.map(
-								image =>
-									image.messageID
-							);
-
-						const coverID =
-							album._telegramCoverMessageID ||
-							messageIDs[0];
-
-						const messageIDString =
-							messageIDs.join(",");
-
-						const id =
-							generateAlbumID(album.name);
-
-						const js =
-							`,
-	{
-		id: "${id.replace(/"/g, '\\"')}",
-		name: "${album.name.replace(/"/g, '\\"')}",
-		url: \`
-		tg://chat/${chatId}?cover=${coverID}&messages=${messageIDString}
-		\`.trim(),
-		tags: ${JSON.stringify(album.tags || [])}
-	}`;
+						const line =
+							await compressAlbum(album);
 
 						navigator.clipboard
-							.writeText(js)
+							.writeText(line)
 							.then(() => {
 								alert(
-									"Copied Telegram album entry!"
+									"Copied a line for album.txt!"
 								);
 							})
 							.catch(() => {
 								prompt(
 									"Copy this:",
-									js
+									line
 								);
 							});
 
@@ -364,28 +299,21 @@ async function showAlbums() {
                 }
 
                 deleteBtn.onclick =
-                    (e) => {
+                    async (e) => {
 
                         e.stopPropagation();
 
-                        let saved =
-                            JSON.parse(
-                                localStorage.getItem(
-                                    "savedAlbums"
-                                ) || "[]"
-                            );
+                        const saved =
+                            await getSavedAlbums();
 
-                        saved =
+                        const filtered =
                             saved.filter(
                                 savedAlbum =>
                                     savedAlbum.id !==
                                     album.id
                             );
 
-                        localStorage.setItem(
-                            "savedAlbums",
-                            JSON.stringify(saved)
-                        );
+                        await setSavedAlbums(filtered);
 
                         showAlbums();
 
@@ -414,49 +342,26 @@ async function showAlbums() {
                         "↗";
 
                     exportBtn.title =
-                        "Copy to albums.js";
+                        "Copy album.txt line";
 
                     exportBtn.onclick =
-                        (e) => {
+                        async (e) => {
 
                             e.stopPropagation();
+							
+							//set storage to false when export is meant for the txt
+							album.storage = false;
 
-                            const query =
-                                createAlbumQuery(
-                                    album
-                                );
-
-                            const id =
-                                generateAlbumID(
-                                    album.name
-                                );
-
-                            const js =
-                                `,
-	{
-		id: "${id.replace(
-                            /"/g,
-                            '\\"'
-                        )}",
-		name: "${album.name.replace(
-                            /"/g,
-                            '\\"'
-                        )}",
-		url: \`
-		?${query}
-		\`.trim(),
-		tags: ${JSON.stringify(
-                            album.tags || []
-                        )}
-	}`;
+                            const line =
+                                await compressAlbum(album);
 
                             navigator.clipboard
-                                .writeText(js)
+                                .writeText(line)
                                 .then(
                                     () => {
 
                                         alert(
-                                            "Copied album.js entry!"
+                                            "Copied a line for album.txt!"
                                         );
 
                                     }
@@ -466,7 +371,7 @@ async function showAlbums() {
 
                                         prompt(
                                             "Copy this:",
-                                            js
+                                            line
                                         );
 
                                     }
@@ -586,7 +491,7 @@ async function showAlbums() {
 }
 
 
-function refreshSavedAlbums() {
+async function refreshSavedAlbums() {
 
     for (
         let i = albums.length - 1;
@@ -608,9 +513,7 @@ function refreshSavedAlbums() {
     }
 
     const saved =
-        JSON.parse(
-            localStorage.getItem("savedAlbums") || "[]"
-        );
+        await getSavedAlbums();
 
     saved.forEach(
         album => {
@@ -638,22 +541,4 @@ function returnToAlbums() {
 
     goBackToAlbumsWithTransition();
 
-}
-
-
-async function buildAlbumTags(album) {
-
-    const tagSet = new Set();
-
-    album.images.forEach(img => {
-
-        (img.tags || []).forEach(tag => {
-            tagSet.add(tag);
-        });
-
-    });
-
-    album.tags = [...tagSet];
-
-    buildTagList(album.tags);
 }

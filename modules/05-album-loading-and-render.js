@@ -5,6 +5,46 @@
  * data item for each image in it.
  */
 
+/*
+ * album.images (as stored/decompressed) is a sparse map keyed by image
+ * number -- convenient for storage and editing, but the rest of the
+ * rendering pipeline wants a plain ordered array to iterate and index
+ * into. This derives that array (album._imagesArray), in ascending
+ * numeric-key order, and keeps it around so re-deriving isn't needed
+ * on every render. Editing operations (add/remove -- see
+ * 17-add-image-editor.js) update both the map and this array together.
+ */
+function buildImagesArray(album) {
+
+    if (!album.images || typeof album.images !== "object") {
+
+        album._imagesArray =
+            [];
+
+        return album._imagesArray;
+
+    }
+
+    album._imagesArray =
+        Object.keys(album.images)
+            .sort((a, b) => Number(a) - Number(b))
+            .map(number => {
+
+                const entry =
+                    album.images[number];
+
+                entry._imageNumber =
+                    number;
+
+                return entry;
+
+            });
+
+    return album._imagesArray;
+
+}
+
+
 async function loadAlbum(album, pushHistory = true) {
 
     selectedTags.clear();
@@ -41,6 +81,9 @@ async function loadAlbum(album, pushHistory = true) {
 	showAlbumButtons(true);
 	addAlbumPageEditButton(album);
 
+	document.getElementById("settingsButton").style.display =
+		"none";
+
     if (album.url?.startsWith("tg://chat/")) {
 		try {
 			await loadTelegramAlbum(album);
@@ -48,11 +91,10 @@ async function loadAlbum(album, pushHistory = true) {
 			alert("Failed to load Telegram album:\n\n" + (error?.message || String(error)));
 			return;
 		}
-
-		await updateTelegramFullCacheAlbums(
-			album.id
-		);
 	}
+
+    const images =
+        buildImagesArray(album);
 
     const gallery = document.getElementById("gallery");
     gallery.innerHTML = "";
@@ -65,14 +107,7 @@ async function loadAlbum(album, pushHistory = true) {
     mediumQueue = [];
     mediumLoading = false;
 
-    album.images.forEach((image, index) => {
-		if (image.source === "telegram") {
-			console.log(
-				"[TELEGRAM SAVED IMAGE]",
-				image.messageID,
-				image.tags
-			);
-		}
+    images.forEach((image, index) => {
 
 		createAlbumImageItems(
 			album,
@@ -84,22 +119,13 @@ async function loadAlbum(album, pushHistory = true) {
 
     createAddImageTile(gallery);
 
-    if (album.tags?.length)
-        buildTagList(album.tags);
-    else
-        buildAlbumTags(album);
+    buildTagList(album.tags || []);
 
     requestAnimationFrame(() => requestAnimationFrame(() => {
         loadTagBarState();
         applyGalleryLayout(false);
         startThumbnailLoading();
 
-        /*
-         * Signal that the gallery grid has been laid out and its
-         * thumbnail slots now have their real, final positions. The
-         * view-transition module waits for this before flying the
-         * clicked cover image into its slot.
-         */
         document.dispatchEvent(
             new CustomEvent("albumLayoutReady", {
                 detail: { album }
@@ -111,10 +137,38 @@ async function loadAlbum(album, pushHistory = true) {
 }
 
 
+/*
+ * Resolves an image entry's tags (indices into album.tags) to their
+ * actual tag strings. Anything the rest of the app touches (tag
+ * filtering, alt text, the tag bar) works with tag strings, same as
+ * before -- this is the one place indices get translated.
+ */
+function resolveImageTagStrings(album, image) {
+
+    if (!Array.isArray(image?.tags))
+        return [];
+
+    const albumTags =
+        Array.isArray(album?.tags)
+            ? album.tags
+            : [];
+
+    return image.tags
+        .map(index => albumTags[index])
+        .filter(tag => typeof tag === "string" && tag);
+
+}
+
+
 function createAlbumImageItems(album, image, index, gallery) {
-    const source = image.source || "url";
-    const urls = getImageURLs(image);
-    if (!urls.thumb && source === "url")
+
+    const tags =
+        resolveImageTagStrings(album, image);
+
+    const urls =
+        getImageURLs(image, album);
+
+    if (!urls.thumb)
         return;
 
     const slot = document.createElement("div");
@@ -129,7 +183,7 @@ function createAlbumImageItems(album, image, index, gallery) {
 
     const thumbImg = document.createElement("img");
     thumbImg.className = "thumb thumbnail-image";
-	thumbImg.alt = (image.tags || []).join(",");
+	thumbImg.alt = tags.join(",");
 
     const mediumImg = document.createElement("img");
     mediumImg.className = "thumb medium-image";
@@ -148,7 +202,8 @@ function createAlbumImageItems(album, image, index, gallery) {
             e.stopPropagation();
             if (!confirm("Remove this added image?"))
                 return;
-            album.images.splice(index, 1);
+            if (image._imageNumber != null)
+                delete album.images[image._imageNumber];
             album.edited = true;
             showEditedAlbumSaveButton();
             loadAlbum(album, false);
@@ -160,16 +215,11 @@ function createAlbumImageItems(album, image, index, gallery) {
         index,
         slotIndex: gallery.children.length - 1,
         image,
-		tags: image.tags || [],
+        _album: album,
+		tags,
         src: urls.thumb,
         mediumSrc: urls.medium,
         fullSrc: urls.full,
-        source,
-        telegramFileID: image.telegramFileID || null,
-        telegramThumbnailFileID: image.telegramThumbnailFileID || null,
-        mimeType: image.mimeType || "",
-        fileName: image.fileName || "",
-        messageID: image.messageID || null,
         slot,
         img: thumbImg,
         mediumImg,
@@ -194,24 +244,12 @@ function createAlbumImageItems(album, image, index, gallery) {
     mediumItems.push({
         index,
         image,
+        _album: album,
         src: urls.medium,
-        source,
-        telegramFileID: image.telegramFileID || null,
-        mimeType: image.mimeType || "",
-        fileName: image.fileName || "",
-        messageID: image.messageID || null,
         mediumLoaded: false,
         mediumLoading: false,
         mediumFailed: false,
         mediumImage: mediumImg,
         mediumBlobURL: null
     });
-}
-
-
-function getImageURLs(image) {
-    const thumb = image.thumb?.url || image.image?.url || image.medium?.url || "";
-    const medium = image.medium?.url || image.image?.url || thumb;
-    const full = image.image?.url || image.medium?.url || thumb;
-    return { thumb, medium, full };
 }

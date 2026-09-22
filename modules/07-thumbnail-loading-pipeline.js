@@ -880,10 +880,14 @@ function scheduleThumbnailVisibilityCheck() {
 
 
 /*
- * How many Telegram thumbnails load at once. Raise or lower this one
- * number to change the batch size -- everything else scales off it.
+ * How many thumbnails load at once. Raise or lower this one number to
+ * change the batch size -- everything else scales off it. Every
+ * source (imgbb, Telegram-via-worker, anything else declared in
+ * config.providers) is a plain HTTP URL now, so there's no reason to
+ * treat any album differently -- one batching strategy for all of
+ * them.
  */
-const TELEGRAM_THUMBNAIL_BATCH_SIZE = 25;
+const THUMBNAIL_BATCH_SIZE = 25;
 
 
 /*
@@ -921,23 +925,14 @@ async function loadInBatches(items, batchSize, loaderFn, isSessionActive) {
 
 
 /*
- * Loads every eligible thumbnail for a Telegram album in fixed-size
- * batches (TELEGRAM_THUMBNAIL_BATCH_SIZE) rather than one at a time.
- * Telegram thumbnails now go through the Cloudflare-backed endpoint
- * rather than a raw MTProto RPC per image, so a modest batch of
- * parallel requests is cheap -- but loading literally all of them at
- * once for a very large album isn't necessary and batching keeps that
- * bounded.
+ * Loads every eligible thumbnail in fixed-size batches
+ * (THUMBNAIL_BATCH_SIZE) rather than one at a time.
  *
  * loadThumbnail() claims a slot synchronously (before its first
  * await), so calling it repeatedly within a batch -- without waiting
  * for each call to finish -- is safe: each call's slot claim
  * completes before the next call starts, even though the network
  * requests themselves all run in parallel afterward.
- *
- * This is only used for Telegram-sourced albums (see
- * startThumbnailLoading()) so it doesn't change behavior for linked-
- * image albums.
  */
 function loadAllThumbnailsConcurrently(session) {
 
@@ -957,7 +952,7 @@ function loadAllThumbnailsConcurrently(session) {
 
     loadInBatches(
         eligible,
-        TELEGRAM_THUMBNAIL_BATCH_SIZE,
+        THUMBNAIL_BATCH_SIZE,
         item => loadThumbnail(item, session),
         () => session === thumbnailLoadSession
     ).then(() => {
@@ -1003,22 +998,9 @@ function startThumbnailLoading() {
     if (!slots.length)
         return;
 
-    const isTelegramAlbum =
-        typeof currentAlbum?.url === "string" &&
-        currentAlbum.url.startsWith("tg://chat/");
-
     thumbnailPriorityMode = false;
 
-    if (isTelegramAlbum) {
-
-        loadAllThumbnailsConcurrently(session);
-
-    } else {
-
-        rebuildThumbnailQueue(false, true);
-        processThumbnailQueue(session);
-
-    }
+    loadAllThumbnailsConcurrently(session);
 
     thumbnailObserver = new IntersectionObserver(entries => {
         if (entries.some(entry => entry.isIntersecting))
@@ -1028,4 +1010,5 @@ function startThumbnailLoading() {
     slots.forEach(slot => thumbnailObserver.observe(slot));
     window.addEventListener("scroll", scheduleThumbnailVisibilityCheck, {passive: true});
     window.addEventListener("resize", scheduleThumbnailVisibilityCheck);
+
 }

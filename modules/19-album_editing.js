@@ -51,7 +51,7 @@ function updateAlbumEditedState(album) {
  * ========================================================== */
 
 
-function saveAlbumEdits(album) {
+async function saveAlbumEdits(album) {
 
     if (
         !album ||
@@ -61,11 +61,7 @@ function saveAlbumEdits(album) {
     }
 
     const saved =
-        JSON.parse(
-            localStorage.getItem(
-                "savedAlbums"
-            ) || "[]"
-        );
+        await getSavedAlbums();
 
     const index =
         saved.findIndex(
@@ -87,10 +83,7 @@ function saveAlbumEdits(album) {
         ...album
     };
 
-    localStorage.setItem(
-        "savedAlbums",
-        JSON.stringify(saved)
-    );
+    await setSavedAlbums(saved);
 
     return true;
 }
@@ -101,7 +94,7 @@ function saveAlbumEdits(album) {
  * ========================================================== */
 
 
-function renameAlbum(album) {
+async function renameAlbum(album) {
 
     if (!album)
         return false;
@@ -145,9 +138,9 @@ function renameAlbum(album) {
     if (album.storage) {
 
         if (
-            !saveAlbumEdits(
+            !(await saveAlbumEdits(
                 album
-            )
+            ))
         ) {
             return false;
         }
@@ -163,7 +156,7 @@ function renameAlbum(album) {
             typeof saveTemporaryAlbum ===
             "function"
         ) {
-            saveTemporaryAlbum(
+            await saveTemporaryAlbum(
                 album
             );
         }
@@ -178,13 +171,13 @@ function renameAlbum(album) {
  * ========================================================== */
 
 
-function editAlbum(album) {
+async function editAlbum(album) {
 
     if (!album)
         return false;
 
     const changed =
-        renameAlbum(
+        await renameAlbum(
             album
         );
 

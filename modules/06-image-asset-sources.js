@@ -1,1600 +1,244 @@
 /*
  * 06-image-asset-sources.js
  *
- * The pluggable "image source" layer: resolves a thumb/medium/full URL
- * to an actual displayable asset, for either plain URLs (fetch + Cache
- * API) or Telegram file IDs (chunked download). This is the extension
- * point for adding new import sources later.
+ * Resolves an image + size ("thumb"/"medium"/"full") to an actual
+ * displayable URL, by trying each of that image's declared source
+ * candidates in order (see getImageProviderCandidates() in
+ * 00b-config-and-providers.js) until one actually loads.
+ *
+ * Every provider -- imgbb, Telegram (now served through your
+ * Cloudflare Worker as plain HTTP), or anything else declared in the
+ * user's config -- is just a URL from here on. There's no more raw
+ * MTProto downloading in the browser for image bytes, and no need for
+ * this app's own manual response cache: every candidate is a normal,
+ * cacheable HTTP(S) URL, so the browser's native HTTP cache already
+ * gives repeat visits the same instant-load behavior for every source
+ * uniformly.
  */
 
-const imageAssetCache = new WeakMap();
+const RESOLVED_URL_ATTEMPTS_PER_CANDIDATE =
+    2;
 
-const imageResponseCacheName = "gallery-image-assets-v1";
+const RESOLVED_URL_TIMEOUT_MS =
+    15000;
 
-const telegramDownloadFailures =
+const resolvedAssetCache =
     new WeakMap();
-	
-const telegramFullCacheStateKey =
-    "telegramFullImageCacheState-v1";
 
-async function downloadTelegramRaw(fileID, options = {}) {
 
-    if (
-        !fileID ||
-        !window.telegramClient
-    ) {
-        throw new Error(
-            "Telegram client or file ID is unavailable."
-        );
-    }
+/*
+ * Tries to load exactly one candidate URL via a throwaway <img>,
+ * resolving with the URL itself on success (the browser now has it in
+ * its own HTTP cache, so handing this same URL to the real <img> a
+ * moment later is effectively instant) or rejecting on error/timeout.
+ */
+function probeImageURL(url, timeoutMs, isActive) {
 
-    if (!window.__galleryMTKrutoModule) {
+    return new Promise((resolve, reject) => {
 
-        window.__galleryMTKrutoModule =
-            import(
-                "https://esm.sh/@mtkruto/browser@0.217.0"
-            );
+        if (isActive && !isActive()) {
 
-    }
+            reject(new Error("Load was cancelled."));
 
-    const mtkruto =
-        await window.__galleryMTKrutoModule;
+            return;
 
-    const decoded =
-        mtkruto.deserializeFileId(fileID);
+        }
 
-    if (
-        !decoded ||
-        !decoded.location
-    ) {
-        throw new Error(
-            "Telegram file ID could not be decoded."
-        );
-    }
+        const probe =
+            new Image();
 
-    let location;
+        let settled =
+            false;
 
-    if (
-        decoded.location.type === "common"
-    ) {
+        const timer =
+            setTimeout(() => {
 
-        location = {
+                if (settled)
+                    return;
 
-            _:
-                "inputDocumentFileLocation",
+                settled = true;
 
-            id:
-                decoded.location.id,
+                probe.src = "";
 
-            access_hash:
-                decoded.location.accessHash,
+                reject(new Error("Timed out."));
 
-            file_reference:
-                decoded.fileReference ||
-                new Uint8Array(),
+            }, timeoutMs);
 
-            thumb_size:
-                ""
+        probe.onload = () => {
+
+            if (settled)
+                return;
+
+            settled = true;
+
+            clearTimeout(timer);
+
+            resolve(url);
 
         };
 
-    }
-    else if (
-        decoded.location.type === "photo"
-    ) {
+        probe.onerror = () => {
 
-        location = {
+            if (settled)
+                return;
 
-            _:
-                "inputPhotoFileLocation",
+            settled = true;
 
-            id:
-                decoded.location.id,
+            clearTimeout(timer);
 
-            access_hash:
-                decoded.location.accessHash,
-
-            file_reference:
-                decoded.fileReference ||
-                new Uint8Array(),
-
-            thumb_size:
-                decoded.location.thumbSize ||
-                decoded.location.thumb_size ||
-                ""
+            reject(new Error("Failed to load."));
 
         };
 
-    }
-    else {
+        probe.src =
+            url;
 
-        throw new Error(
-            "Unsupported Telegram file location: " +
-            decoded.location.type
-        );
+    });
 
-    }
-
-    return downloadTelegramLocationRaw(
-        location,
-        options
-    );
-}
-
-async function downloadTelegramLocationRaw(
-    location,
-    options = {}
-) {
-
-    if (
-        !location ||
-        !window.telegramClient
-    ) {
-
-        throw new Error(
-            "Telegram client or file location is unavailable."
-        );
-
-    }
-
-    const chunkSize =
-        options.chunkSize ||
-        256 * 1024;
-
-    const limit =
-        Math.max(
-            1024,
-            Math.floor(
-                chunkSize / 1024
-            ) * 1024
-        );
-
-    const chunks =
-        [];
-
-    let offset =
-        0n;
-
-    while (true) {
-
-        const result =
-            await window.telegramClient.invoke({
-
-                _:
-                    "upload.getFile",
-
-                location,
-
-                offset,
-
-                limit
-
-            });
-
-        if (
-            result?._ !== "upload.file"
-        ) {
-
-            throw new Error(
-                "Telegram returned an unexpected file response."
-            );
-
-        }
-
-        const bytes =
-            result.bytes;
-
-        if (
-            !bytes ||
-            !bytes.byteLength
-        ) {
-
-            break;
-
-        }
-
-        chunks.push(
-            bytes
-        );
-
-        offset +=
-            BigInt(
-                bytes.byteLength
-            );
-
-        if (
-            bytes.byteLength <
-            limit
-        ) {
-
-            break;
-
-        }
-
-    }
-
-    return chunks;
-}
-
-async function blobURLFromResponse(response, assets, key) {
-    if (!response || !response.ok)
-        return null;
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    assets[key] = url;
-    return url;
 }
 
 
 /*
- * How many parallel byte-range requests to split a linked (non-
- * Telegram) image download into. Raise or lower this one number to
- * tune it.
+ * Works through an ordered list of {url, providerName} candidates,
+ * retrying each one a limited number of times before moving on to the
+ * next. Returns the first URL that actually loads, or null if every
+ * candidate is exhausted.
  */
-const RANGED_DOWNLOAD_PARTS = 5;
+async function resolveFirstWorkingCandidate(candidates, isActive) {
 
+    for (const candidate of candidates) {
 
-/*
- * Downloads a URL as several concurrent HTTP range requests instead of
- * one plain GET, for hosts (like imgbb) that serve range requests fast
- * enough that splitting the download into parallel pieces beats a
- * single connection. Falls back to a plain fetch in resolveCachedURL()
- * below if this fails for any reason (server doesn't support ranges,
- * CORS blocks the HEAD request, a range comes back the wrong size,
- * etc) -- this is strictly an optional fast path, never the only way
- * an image can load.
- */
-async function downloadByRanges(
-    url,
-    {
-        parts = RANGED_DOWNLOAD_PARTS,
-        cache = "default",
-        headers = {},
-        timeout = 60000,
-        verifyRanges = true
-    } = {}
-) {
-    if (!url)
-        throw new Error("URL is required.");
+        for (
+            let attempt = 1;
+            attempt <= RESOLVED_URL_ATTEMPTS_PER_CANDIDATE;
+            attempt++
+        ) {
 
-    parts = Math.max(1, Math.floor(parts));
+            if (isActive && !isActive())
+                return null;
 
-    const fetchRange = async (start, end) => {
-        const controller = new AbortController();
+            try {
 
-        const timer = setTimeout(
-            () => controller.abort(),
-            timeout
-        );
-
-        try {
-            const response = await fetch(url, {
-                cache,
-                headers: {
-                    ...headers,
-                    Range: `bytes=${start}-${end}`
-                },
-                signal: controller.signal
-            });
-
-            if (response.status !== 206)
-                throw new Error(
-                    `Expected HTTP 206, got HTTP ${response.status}`
+                return await probeImageURL(
+                    candidate.url,
+                    RESOLVED_URL_TIMEOUT_MS,
+                    isActive
                 );
 
-            const reader = response.body.getReader();
+            } catch (error) {
 
-            const chunks = [];
-            let size = 0;
+                console.debug(
+                    "[IMAGE] Candidate failed",
+                    {
+                        provider: candidate.providerName,
+                        url: candidate.url,
+                        attempt,
+                        errorMessage: error?.message
+                    }
+                );
 
-            for (;;) {
-                const {done, value} =
-                    await reader.read();
-
-                if (done)
-                    break;
-
-                chunks.push(value);
-                size += value.byteLength;
             }
 
-            return {
-                chunks,
-                size
-            };
-        } finally {
-            clearTimeout(timer);
-        }
-    };
-
-    const head = await fetch(url, {
-        method: "HEAD",
-        cache,
-        headers
-    });
-
-    if (!head.ok)
-        throw new Error(
-            `HEAD request failed: HTTP ${head.status}`
-        );
-
-    const total = Number(
-        head.headers.get("content-length")
-    );
-
-    if (!Number.isFinite(total) || total <= 0)
-        throw new Error(
-            "Server did not provide a usable Content-Length."
-        );
-
-    const contentType =
-        head.headers.get("content-type") ||
-        "application/octet-stream";
-
-    const buffer = new ArrayBuffer(total);
-    const target = new Uint8Array(buffer);
-
-    const ranges = Array.from(
-        {length: parts},
-        (_, i) => {
-            const start =
-                Math.floor(i * total / parts);
-
-            const end =
-                i === parts - 1
-                    ? total - 1
-                    : Math.floor(
-                        (i + 1) * total / parts
-                    ) - 1;
-
-            return {
-                start,
-                end,
-                size: end - start + 1
-            };
-        }
-    );
-
-    const results = await Promise.all(
-        ranges.map(range =>
-            fetchRange(
-                range.start,
-                range.end
-            )
-        )
-    );
-
-    results.forEach((result, i) => {
-        const range = ranges[i];
-
-        if (
-            verifyRanges &&
-            result.size !== range.size
-        ) {
-            throw new Error(
-                `Range ${i + 1} size mismatch: ` +
-                `${result.size} received, ` +
-                `${range.size} expected`
-            );
         }
 
-        let position = range.start;
+    }
 
-        for (const chunk of result.chunks) {
-            target.set(chunk, position);
-            position += chunk.byteLength;
-        }
+    return null;
 
-        if (
-            verifyRanges &&
-            position !== range.end + 1
-        ) {
-            throw new Error(
-                `Range ${i + 1} ended at ` +
-                `${position - 1}, expected ` +
-                `${range.end}`
-            );
-        }
-    });
-
-    return new Blob(
-        [buffer],
-        {type: contentType}
-    );
 }
 
 
-async function resolveCachedURL(url, image, resolution, isActive) {
-    if (!url)
+/*
+ * item.image is the raw album.images[n] entry (see
+ * 00b-config-and-providers.js); item._album is the album it came from
+ * (needed to look up album.sources). Both are set when the item is
+ * created -- see createAlbumImageItems() in
+ * 05-album-loading-and-render.js.
+ */
+async function resolveImageAsset(item, resolution, isActive) {
+
+    if (!item?.image)
         return null;
 
-    let assets = imageAssetCache.get(image);
-    if (!assets) {
-        assets = {};
-        imageAssetCache.set(image, assets);
-    }
-    if (assets[resolution])
-        return assets[resolution];
+    let cached =
+        resolvedAssetCache.get(item.image);
 
-    const cacheKey = `https://gallery-image.invalid/url/${resolution}/${encodeURIComponent(url)}`;
-    let cache = null;
+    if (!cached) {
 
-    try {
-        if (window.caches) {
-            cache = await caches.open(imageResponseCacheName);
-            const cached = await cache.match(cacheKey);
-            if (cached)
-                return blobURLFromResponse(cached, assets, resolution);
-        }
-    } catch (error) {
-        console.debug("[IMAGE CACHE] Cache lookup failed", {
-            resolution,
-            url,
-            error
-        });
+        cached = {};
+
+        resolvedAssetCache.set(item.image, cached);
+
     }
 
-    let response = null;
+    if (cached[resolution])
+        return cached[resolution];
 
-    /*
-     * Try the parallel ranged download first -- this is the whole
-     * point of this fast path. Any failure here (unsupported ranges,
-     * a HEAD request that gets blocked, a size mismatch, a timeout)
-     * just falls through to the plain fetch below rather than
-     * breaking the image.
-     */
-    try {
-        const blob = await downloadByRanges(url);
+    const candidates =
+        getImageProviderCandidates(
+            item._album || currentAlbum,
+            item.image,
+            resolution
+        );
 
-        response = new Response(blob, {
-            headers: {
-                "Content-Type": blob.type || "application/octet-stream"
-            }
-        });
+    if (!candidates.length)
+        return null;
 
-    } catch (error) {
-        console.debug("[IMAGE FETCH] Ranged download failed; falling back to a plain fetch", {
-            resolution,
-            url,
-            errorName: error?.name,
-            errorMessage: error?.message
-        });
-    }
+    const url =
+        await resolveFirstWorkingCandidate(candidates, isActive);
+
+    if (!url)
+        return null;
 
     if (isActive && !isActive())
         return null;
 
-    if (!response) {
+    cached[resolution] =
+        url;
 
-        try {
-            response = await fetch(url, {cache: "force-cache"});
-        } catch (error) {
-            console.debug("[IMAGE FETCH] Fetch failed", {
-                resolution,
-                url,
-                errorName: error?.name,
-                errorMessage: error?.message
-            });
-            return null;
-        }
+    return url;
 
-        if (isActive && !isActive())
-            return null;
-
-        if (!response.ok) {
-            console.debug("[IMAGE FETCH] Server returned an error", {
-                resolution,
-                url,
-                status: response.status,
-                statusText: response.statusText
-            });
-            return null;
-        }
-
-    }
-
-    try {
-        if (cache)
-            await cache.put(cacheKey, response.clone());
-    } catch (error) {
-        console.debug("[IMAGE CACHE] Cache store failed", {
-            resolution,
-            url,
-            error
-        });
-    }
-
-    try {
-        return await blobURLFromResponse(response, assets, resolution);
-    } catch (error) {
-        console.debug("[IMAGE FETCH] Response-to-Blob failed", {
-            resolution,
-            url,
-            errorName: error?.name,
-            errorMessage: error?.message
-        });
-        return null;
-    }
-}
-
-async function refreshTelegramThumbnailFileID(image) {
-
-    if (
-        !image ||
-        !window.telegramClient ||
-        image.telegramChatID == null ||
-        image.messageID == null
-    ) {
-
-        return null;
-
-    }
-
-    const client =
-        window.telegramClient;
-
-
-    /*
-     * MTKruto's normal getMessages() already works for this
-     * channel. We therefore use its entity-aware input peer
-     * and convert the resulting inputPeerChannel into the
-     * inputChannel constructor required by channels.getMessages.
-     */
-
-    const inputChannel =
-		await client.getInputChannel(
-			image.telegramChatID
-		);
-
-
-    const result =
-		await client.invoke({
-			_: "channels.getMessages",
-			channel: inputChannel,
-			id: [
-				{
-					_: "inputMessageID",
-					id: Number(image.messageID)
-				}
-			]
-		});
-
-
-    if (
-        !result ||
-        !Array.isArray(result.messages) ||
-        !result.messages.length
-    ) {
-
-        throw new Error(
-            "Telegram returned no message during thumbnail refresh."
-        );
-
-    }
-
-
-    const rawMessage =
-        result.messages.find(
-            message =>
-                message &&
-                Number(
-                    message.id
-                ) ===
-                Number(
-                    image.messageID
-                )
-        );
-
-
-    if (!rawMessage) {
-
-        throw new Error(
-            "Telegram did not return the requested message."
-        );
-
-    }
-
-
-    /*
-     * This album contains documents.
-     */
-
-    const rawDocument =
-        rawMessage.media?._ ===
-            "messageMediaDocument" &&
-        rawMessage.media.document?._ ===
-            "document"
-            ? rawMessage.media.document
-            : null;
-
-
-    if (!rawDocument) {
-
-        throw new Error(
-            "Telegram message does not contain a raw document."
-        );
-
-    }
-
-
-    /*
-     * Telegram calls these "thumbs" in the raw document
-     * structure. They are the actual generated thumbnails
-     * belonging to the document.
-     */
-
-    const thumbs =
-        Array.isArray(
-            rawDocument.thumbs
-        )
-            ? rawDocument.thumbs
-            : [];
-
-
-    if (!thumbs.length) {
-
-        throw new Error(
-            "Telegram document contains no thumbnails."
-        );
-
-    }
-
-
-    const usableThumbs =
-        thumbs.filter(
-            thumb =>
-                thumb &&
-                (
-                    thumb._ ===
-                        "photoSize" ||
-                    thumb._ ===
-                        "photoCachedSize"
-                )
-        );
-
-
-    if (!usableThumbs.length) {
-
-        throw new Error(
-            "Telegram document contains no usable thumbnails."
-        );
-
-    }
-
-
-    const smallest =
-        usableThumbs
-            .slice()
-            .sort(
-                (a, b) =>
-                    (
-                        (a.w || 0) *
-                        (a.h || 0)
-                    ) -
-                    (
-                        (b.w || 0) *
-                        (b.h || 0)
-                    )
-            )[0];
-
-
-    /*
-     * photoCachedSize already contains the thumbnail bytes
-     * in the Telegram response. There is nothing to download.
-     */
-
-    if (
-        smallest._ ===
-            "photoCachedSize"
-    ) {
-
-        if (
-            smallest.bytes &&
-            smallest.bytes.byteLength
-        ) {
-
-            return {
-
-                type:
-                    "cached",
-
-                bytes:
-                    smallest.bytes,
-
-                width:
-                    smallest.w,
-
-                height:
-                    smallest.h,
-
-                thumbSize:
-                    smallest.type ||
-                    ""
-
-            };
-
-        }
-
-    }
-
-
-    /*
-     * Normal photoSize thumbnails must be downloaded through
-     * inputDocumentFileLocation.
-     */
-
-    if (
-        !rawDocument.file_reference
-    ) {
-
-        throw new Error(
-            "Telegram document has no current file reference."
-        );
-
-    }
-
-
-    const location = {
-
-        _:
-            "inputDocumentFileLocation",
-
-        id:
-            rawDocument.id,
-
-        access_hash:
-            rawDocument.access_hash,
-
-        file_reference:
-            rawDocument.file_reference,
-
-        thumb_size:
-            smallest.type ||
-            ""
-
-    };
-
-
-    return {
-
-        type:
-            "location",
-
-        location,
-
-        width:
-            smallest.w,
-
-        height:
-            smallest.h,
-
-        thumbSize:
-            smallest.type ||
-            ""
-
-    };
-}
-
-const imageSources = {
-    url: {
-        resolve: async (image, resolution, isActive) =>
-            resolveCachedURL(
-                getImageURLs(image)[resolution],
-                image,
-                resolution,
-                isActive
-            )
-    },
-
-    telegram: {
-        resolve: async (
-            image,
-            resolution,
-            isActive
-        ) => {
-
-            const key =
-                resolution === "thumb"
-                    ? "thumb"
-                    : "full";
-
-            let assets =
-                imageAssetCache.get(image);
-
-            if (!assets) {
-
-                assets = {};
-
-                imageAssetCache.set(
-                    image,
-                    assets
-                );
-
-            }
-
-            if (assets[key])
-                return assets[key];
-
-            const fileID =
-                resolution === "thumb"
-                    ? image.telegramThumbnailFileID
-                    : image.telegramFileID;
-
-            if (
-                !fileID ||
-                !window.telegramClient
-            ) {
-
-                return null;
-
-            }
-
-            let failureState =
-                telegramDownloadFailures.get(
-                    image
-                );
-
-            if (!failureState) {
-
-                failureState = {};
-
-                telegramDownloadFailures.set(
-                    image,
-                    failureState
-                );
-
-            }
-
-            if (
-                failureState[key] &&
-                failureState[key].fileID === fileID
-            ) {
-
-                return null;
-
-            }
-
-            /*
-             * Telegram thumbnails have one persistent cache namespace.
-             *
-             * Telegram full images are persistent only for the current
-             * album and the immediately previous album.
-             */
-            let cacheKey = null;
-            let persistentFullCache = false;
-
-            if (key === "thumb") {
-
-                cacheKey =
-                    `https://gallery-image.invalid/telegram/` +
-                    `${encodeURIComponent(fileID)}/thumb`;
-
-            }
-            else {
-
-                const albumID =
-                    currentAlbum?.id;
-
-                if (albumID) {
-
-                    let state = null;
-
-                    try {
-
-                        const stored =
-                            localStorage.getItem(
-                                telegramFullCacheStateKey
-                            );
-
-                        if (stored)
-                            state =
-                                JSON.parse(stored);
-
-                    }
-                    catch (error) {
-
-                        console.debug(
-                            "[TELEGRAM CACHE] Failed to read full-cache state",
-                            {
-                                errorName:
-                                    error?.name,
-
-                                errorMessage:
-                                    error?.message
-                            }
-                        );
-
-                    }
-
-                    const albumIDString =
-                        String(albumID);
-
-                    if (
-                        state &&
-                        (
-                            String(state.current || "") ===
-                                albumIDString ||
-                            String(state.previous || "") ===
-                                albumIDString
-                        )
-                    ) {
-
-                        persistentFullCache = true;
-
-                        cacheKey =
-                            `https://gallery-image.invalid/telegram/full/` +
-                            `${encodeURIComponent(albumIDString)}/` +
-                            `${encodeURIComponent(fileID)}`;
-
-                    }
-
-                }
-
-            }
-
-            /*
-             * Persistent cache lookup.
-             */
-            if (
-                cacheKey &&
-                (
-                    key === "thumb" ||
-                    persistentFullCache
-                )
-            ) {
-
-                try {
-
-                    if (window.caches) {
-
-                        const cache =
-                            await caches.open(
-                                imageResponseCacheName
-                            );
-
-                        const cached =
-                            await cache.match(
-                                cacheKey
-                            );
-
-                        if (cached) {
-
-                            return blobURLFromResponse(
-                                cached,
-                                assets,
-                                key
-                            );
-
-                        }
-
-                    }
-
-                }
-                catch (error) {
-
-                    console.debug(
-                        "[TELEGRAM CACHE] Cache lookup failed",
-                        {
-                            key,
-                            fileID,
-                            errorName:
-                                error?.name,
-                            errorMessage:
-                                error?.message
-                        }
-                    );
-
-                }
-
-            }
-
-            let chunks;
-
-            try {
-
-                if (key === "thumb") {
-
-                    const refreshed =
-                        await refreshTelegramThumbnailFileID(
-                            image
-                        );
-
-                    if (
-                        refreshed?.type ===
-                        "cached"
-                    ) {
-
-                        chunks = [
-                            refreshed.bytes
-                        ];
-
-                    }
-                    else if (
-                        refreshed?.type ===
-                        "location"
-                    ) {
-
-                        chunks =
-                            await downloadTelegramLocationRaw(
-                                refreshed.location,
-                                {
-                                    chunkSize:
-                                        64 * 1024
-                                }
-                            );
-
-                    }
-                    else {
-
-                        throw new Error(
-                            "Telegram thumbnail refresh returned no usable thumbnail."
-                        );
-
-                    }
-
-                }
-                else {
-
-                    chunks =
-                        await downloadTelegramRaw(
-                            fileID,
-                            {
-                                chunkSize:
-                                    256 * 1024
-                            }
-                        );
-
-                }
-
-            }
-            catch (error) {
-
-                console.debug(
-                    "[TELEGRAM DOWNLOAD] Raw download failed",
-                    {
-                        key,
-                        fileID,
-                        messageID:
-                            image.messageID,
-                        errorName:
-                            error?.name,
-                        errorMessage:
-                            error?.message,
-                        error
-                    }
-                );
-
-                failureState[key] = {
-                    fileID,
-                    error
-                };
-
-                return null;
-
-            }
-
-            if (
-                isActive &&
-                !isActive()
-            ) {
-
-                return null;
-
-            }
-
-            const totalBytes =
-                chunks.reduce(
-                    (total, chunk) =>
-                        total +
-                        chunk.byteLength,
-                    0
-                );
-
-            if (!totalBytes) {
-
-                failureState[key] = {
-                    fileID,
-                    error:
-                        new Error(
-                            "Telegram returned an empty file."
-                        )
-                };
-
-                console.debug(
-                    "[TELEGRAM DOWNLOAD] Empty file returned",
-                    {
-                        key,
-                        fileID
-                    }
-                );
-
-                return null;
-
-            }
-
-            delete failureState[key];
-
-            const blob =
-                new Blob(
-                    chunks,
-                    {
-                        type:
-                            image.mimeType ||
-                            "image/jpeg"
-                    }
-                );
-
-            /*
-             * Temporary Telegram albums use the original full-size
-             * download for their one-time XMP extraction.
-             *
-             * The Blob already contains the exact original bytes
-             * that are about to be displayed, so this does not
-             * perform another Telegram download.
-             */
-            if (
-                key === "full" &&
-                currentAlbum?.temporary &&
-                !image._telegramXMPProcessed
-            ) {
-
-                try {
-
-                    const buffer =
-                        await blob.arrayBuffer();
-
-                    const metadata =
-                        await getTelegramXMPMetadata(
-                            buffer
-                        );
-
-                    const tags =
-                        [];
-
-                    const seen =
-                        new Set();
-
-                    for (
-                        const tag of
-                        Array.isArray(
-                            metadata?.xmptags?.subject
-                        )
-                            ? metadata.xmptags.subject
-                            : []
-                    ) {
-
-                        if (
-                            typeof tag !==
-                            "string"
-                        ) {
-
-                            continue;
-
-                        }
-
-                        const clean =
-                            tag.trim();
-
-                        if (!clean) {
-                            continue;
-                        }
-
-                        const normalized =
-                            clean.toLowerCase();
-
-                        if (
-                            seen.has(
-                                normalized
-                            )
-                        ) {
-
-                            continue;
-
-                        }
-
-                        seen.add(
-                            normalized
-                        );
-
-                        tags.push(
-                            clean
-                        );
-
-                    }
-
-                    image.tags =
-						tags;
-
-					updateTelegramImageTagsLive(
-						image
-					);
-
-					image._telegramXMPProcessed =
-						true;
-
-					console.log(
-						"[Telegram XMP]",
-						image.messageID,
-						image.fileName,
-						image.tags
-					);
-
-                }
-                catch (error) {
-
-                    console.warn(
-                        "Failed to parse XMP from Telegram message " +
-                        image.messageID,
-                        error
-                    );
-
-                }
-
-            }
-
-            const url =
-                URL.createObjectURL(
-                    blob
-                );
-
-            assets[key] =
-                url;
-
-            /*
-             * Persist:
-             *
-             * - every Telegram thumbnail
-             * - full images only for the current/previous albums
-             */
-            if (
-                cacheKey &&
-                (
-                    key === "thumb" ||
-                    persistentFullCache
-                )
-            ) {
-
-                try {
-
-                    if (window.caches) {
-
-                        const cache =
-                            await caches.open(
-                                imageResponseCacheName
-                            );
-
-                        await cache.put(
-                            cacheKey,
-                            new Response(
-                                blob,
-                                {
-                                    headers: {
-                                        "Content-Type":
-                                            blob.type ||
-                                            "image/jpeg"
-                                    }
-                                }
-                            )
-                        );
-
-                    }
-
-                }
-                catch (error) {
-
-                    console.debug(
-                        "[TELEGRAM CACHE] Cache store failed",
-                        {
-                            key,
-                            fileID,
-                            errorName:
-                                error?.name,
-                            errorMessage:
-                                error?.message
-                        }
-                    );
-
-                }
-
-            }
-
-            return url;
-        }
-    }
-};
-
-async function resolveImageAsset(item, resolution, isActive) {
-    if (!item?.image)
-        return null;
-    const source = imageSources[item.source] || imageSources.url;
-    return source.resolve(item.image, resolution, isActive);
 }
 
 
-function openTemporaryAlbumFromURL(url) {
+/*
+ * A quick, synchronous "best guess" URL for a size -- the first
+ * declared candidate, no fallback probing. Used where a full
+ * ordered-fallback resolution isn't warranted (home page covers,
+ * search-result thumbnails, etc); the main gallery/modal pipeline
+ * uses resolveImageAsset() above for real reliability.
+ */
+function getBestGuessImageURL(album, imageEntry, sizeKey) {
 
-    if (!url)
-        return;
+    const candidates =
+        getImageProviderCandidates(album, imageEntry, sizeKey);
 
-    const query =
-        getAlbumQuery(
-            url.trim()
-        );
-
-    if (!query) {
-
-        alert("No album query was found in that URL.");
-
-        return;
-
-    }
-
-    const album =
-        createQueryAlbum(query);
-
-    const id =
-        generateAlbumID(album.name);
-
-    album.id =
-        id;
-
-    album.temporary =
-        true;
-
-    currentTemporaryAlbumID =
-        id;
-
-    saveTemporaryAlbum(album);
-
-    history.pushState(
-        null,
-        "",
-        "?=" +
-        encodeURIComponent(id)
-    );
-
-    loadAlbum(album, false);
-
-    showAlbumButtons(true);
+    return candidates.length
+        ? candidates[0].url
+        : "";
 
 }
 
-async function updateTelegramFullCacheAlbums(albumID) {
 
-    if (!albumID)
-        return;
+/*
+ * Convenience wrapper matching the shape the rest of the app expects
+ * (getImageURLs() used to read straight off image.thumb.url etc) --
+ * now backed by the provider-candidate system.
+ */
+function getImageURLs(image, album) {
 
-    let state = {
-        current: null,
-        previous: null
-    };
+    const activeAlbum =
+        album || currentAlbum;
 
-    try {
+    const thumb =
+        getBestGuessImageURL(activeAlbum, image, "thumb");
 
-        const stored =
-            localStorage.getItem(
-                telegramFullCacheStateKey
-            );
+    const medium =
+        getBestGuessImageURL(activeAlbum, image, "medium") || thumb;
 
-        if (stored) {
+    const full =
+        getBestGuessImageURL(activeAlbum, image, "full") || medium;
 
-            const parsed =
-                JSON.parse(stored);
-
-            if (parsed && typeof parsed === "object") {
-
-                state.current =
-                    parsed.current || null;
-
-                state.previous =
-                    parsed.previous || null;
-
-            }
-
-        }
-
-    } catch (error) {
-
-        console.debug(
-            "[TELEGRAM CACHE] Failed to read full-cache state",
-            {
-                errorName: error?.name,
-                errorMessage: error?.message
-            }
-        );
-
-    }
-
-    const newAlbumID =
-        String(albumID);
-
-    const oldCurrent =
-        state.current
-            ? String(state.current)
-            : null;
-
-    /*
-     * Opening the album that is already current does not
-     * change the current/previous ordering.
-     */
-    if (oldCurrent !== newAlbumID) {
-
-        state.previous =
-            oldCurrent;
-
-        state.current =
-            newAlbumID;
-
-    }
-
-    /*
-     * Do not keep a duplicate current album as the previous album.
-     */
-    if (
-        state.previous &&
-        String(state.previous) ===
-            String(state.current)
-    ) {
-
-        state.previous =
-            null;
-
-    }
-
-    try {
-
-        localStorage.setItem(
-            telegramFullCacheStateKey,
-            JSON.stringify({
-                current: state.current,
-                previous: state.previous
-            })
-        );
-
-    } catch (error) {
-
-        console.debug(
-            "[TELEGRAM CACHE] Failed to save full-cache state",
-            {
-                errorName: error?.name,
-                errorMessage: error?.message
-            }
-        );
-
-    }
-
-    /*
-     * Nothing further can be done if Cache Storage isn't available.
-     */
-    if (!window.caches)
-        return;
-
-    const retainedAlbums =
-        new Set();
-
-    if (state.current)
-        retainedAlbums.add(
-            String(state.current)
-        );
-
-    if (state.previous)
-        retainedAlbums.add(
-            String(state.previous)
-        );
-
-    try {
-
-        const cache =
-            await caches.open(
-                imageResponseCacheName
-            );
-
-        const requests =
-            await cache.keys();
-
-        let deletedCount = 0;
-
-        for (const request of requests) {
-
-            const url =
-                new URL(request.url);
-
-            /*
-             * Full Telegram cache entries have this form:
-             *
-             * /telegram/full/<albumID>/<fileID>
-             *
-             * Thumbnail entries use a different path and are
-             * intentionally left completely untouched.
-             */
-            const parts =
-                url.pathname
-                    .split("/")
-                    .filter(Boolean);
-
-            if (
-                parts.length < 4 ||
-                parts[0] !== "telegram" ||
-                parts[1] !== "full"
-            ) {
-
-                continue;
-
-            }
-
-            let cachedAlbumID;
-
-            try {
-
-                cachedAlbumID =
-                    decodeURIComponent(
-                        parts[2]
-                    );
-
-            } catch {
-
-                cachedAlbumID =
-                    parts[2];
-
-            }
-
-            if (
-                !retainedAlbums.has(
-                    String(cachedAlbumID)
-                )
-            ) {
-
-                try {
-
-                    if (
-                        await cache.delete(
-                            request
-                        )
-                    ) {
-
-                        deletedCount++;
-
-                    }
-
-                } catch (error) {
-
-                    console.debug(
-                        "[TELEGRAM CACHE] Failed to delete old full image",
-                        {
-                            url: request.url,
-                            errorName: error?.name,
-                            errorMessage: error?.message
-                        }
-                    );
-
-                }
-
-            }
-
-        }
-
-        console.debug(
-            "[TELEGRAM CACHE] Full-image album retention updated",
-            {
-                currentAlbum:
-                    state.current,
-                previousAlbum:
-                    state.previous,
-                deletedEntries:
-                    deletedCount
-            }
-        );
-
-    } catch (error) {
-
-        console.debug(
-            "[TELEGRAM CACHE] Failed to update full-image retention",
-            {
-                errorName: error?.name,
-                errorMessage: error?.message
-            }
-        );
-
-    }
+    return { thumb, medium, full };
 
 }

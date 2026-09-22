@@ -682,19 +682,18 @@ function showSearchResults(results) {
 
     results.forEach(album => {
 
-        if (
-            !album ||
-            !Array.isArray(album.images) ||
-            !album.images.length
-        ) {
+        const images =
+            buildImagesArray(album);
+
+        if (!album || !images.length) {
             return;
         }
 
         const cover =
-            album.images[
+            images[
                 Math.floor(
                     Math.random() *
-                    album.images.length
+                    images.length
                 )
             ];
 
@@ -721,41 +720,11 @@ function showSearchResults(results) {
 
         gallery.appendChild(card);
 
-        if (cover.source === "telegram") {
+        const coverURL =
+            getBestGuessImageURL(album, cover, "thumb");
 
-            resolveImageAsset(
-                {
-                    image: cover,
-                    index: -1,
-                    source: "telegram"
-                },
-                "thumb",
-                () => true
-            )
-            .then(url => {
-
-                if (url)
-                    img.src = url;
-
-            })
-            .catch(error => {
-
-                console.warn(
-                    "Failed to load Telegram search-result cover:",
-                    error
-                );
-
-            });
-
-        } else {
-
-            img.src =
-                cover.thumb?.url ||
-                cover.medium?.url ||
-                cover.image?.url ||
-                "";
-
-        }
+        if (coverURL)
+            img.src = coverURL;
 
     });
 
@@ -795,8 +764,8 @@ searchInput.addEventListener("keydown", e => {
 
 });
 
-
-document.getElementById("regenerateAlbum").onclick = () => {
+//generate new album token mean for album.txt, so set storage to false.
+document.getElementById("regenerateAlbum").onclick = async () => {
 
     if (!currentAlbum)
         return;
@@ -811,25 +780,18 @@ document.getElementById("regenerateAlbum").onclick = () => {
         null,
         "",
         "?$" + encodeURIComponent(newID));
+		
+	currentAlbum.storage = false;
 
-    const query = createAlbumQuery(currentAlbum);
+    const line =
+        await compressAlbum(currentAlbum);
 
-    const js = `,
-	{
-		id: "${newID.replace(/"/g, '\\"')}",
-		name: "${currentAlbum.name.replace(/"/g, '\\"')}",
-		url: \`
-			?${query}
-		\`.trim(),
-		tags: ${JSON.stringify(currentAlbum.tags || [])}
-	}`;
-
-    navigator.clipboard.writeText(js)
+    navigator.clipboard.writeText(line)
     .then(() => {
-        alert("Regenerated albums.js entry and copied it to clipboard!");
+        alert("Regenerated the album ID and copied a line for album.txt!");
     })
     .catch(() => {
-        prompt("Copy this into albums.js:", js);
+        prompt("Copy this into album.txt:", line);
     });
 
 };

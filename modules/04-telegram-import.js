@@ -1,662 +1,15 @@
 /*
  * 04-telegram-import.js
  *
- * Everything Telegram: connecting the client, bulk-importing a chat's
- * photos into an album, loading a chat's cover image, and the chat
- * picker UI. This is one of the two current bulk-import sources.
+ * Telegram is now only used directly for two things: connecting the
+ * client, and browsing chats/messages to build a temp album's image
+ * list. Actual image bytes (thumb/medium/full) are served by whatever
+ * the "telegram" entry in config.providers points at -- your
+ * Cloudflare Worker -- through the normal resolveImageAsset()
+ * pipeline (06-image-asset-sources.js), the same as every other
+ * provider. There is no more raw MTProto downloading of media bytes
+ * anywhere in this file.
  */
-
-async function loadTelegramAlbum(album) {
-
-    if (!window.telegramClient) {
-
-        throw new Error(
-            "Telegram client is not initialized."
-        );
-
-    }
-
-    const client =
-        window.telegramClient;
-
-
-    /*
-     * Parse Telegram album URL.
-     */
-
-    const match =
-        album.url.match(
-            /^tg:\/\/chat\/(-?\d+)(?:\?(.+))?$/
-        );
-
-    if (!match) {
-
-        throw new Error(
-            "Invalid Telegram album URL: " +
-            album.url
-        );
-
-    }
-
-
-    const chatId =
-        Number(match[1]);
-
-    const optionString =
-        match[2] ||
-        "";
-
-    const options =
-        new URLSearchParams(
-            optionString
-        );
-
-    const coverMessageID =
-        options.get("cover");
-
-    const messageString =
-        options.get("messages");
-
-
-    let requestedMessageIDs =
-        [];
-
-    if (messageString) {
-
-        requestedMessageIDs =
-            messageString
-                .split(",")
-                .map(
-                    id =>
-                        Number(id)
-                )
-                .filter(
-                    id =>
-                        Number.isInteger(id) &&
-                        id > 0
-                );
-
-    }
-
-
-    /*
-     * Find the chat.
-     */
-
-    let chat =
-        null;
-
-    if (
-        Array.isArray(
-            window.telegramChats
-        )
-    ) {
-
-        const found =
-            window.telegramChats.find(
-                item =>
-                    item &&
-                    item.chat &&
-                    String(
-                        item.chat.id
-                    ) ===
-                    String(chatId)
-            );
-
-        if (found) {
-
-            chat =
-                found.chat;
-
-        }
-
-    }
-
-
-    if (!chat) {
-
-        const chats =
-            await client.getChats({
-                limit:
-                    500
-            });
-
-        window.telegramChats =
-            chats;
-
-        const found =
-            chats.find(
-                item =>
-                    item &&
-                    item.chat &&
-                    String(
-                        item.chat.id
-                    ) ===
-                    String(chatId)
-            );
-
-        if (found) {
-
-            chat =
-                found.chat;
-
-        }
-
-    }
-
-
-    if (!chat) {
-
-        throw new Error(
-            "Telegram chat was not found: " +
-            chatId
-        );
-
-    }
-
-
-    /*
-     * Retrieve the requested messages.
-     */
-
-    let messages =
-        [];
-
-    if (
-        requestedMessageIDs.length
-    ) {
-
-        messages =
-            await client.getMessages(
-                chat.id,
-                requestedMessageIDs
-            );
-
-    }
-    else {
-
-        messages =
-            await client.getHistory(
-                chat.id,
-                {
-                    limit:
-                        100
-                }
-            );
-
-    }
-
-
-    /*
-     * Restore the exact order from the URL.
-     */
-
-    if (
-        requestedMessageIDs.length
-    ) {
-
-        const messageMap =
-            new Map();
-
-        for (
-            const message of
-            messages
-        ) {
-
-            if (
-                message &&
-                Number.isInteger(
-                    message.id
-                )
-            ) {
-
-                messageMap.set(
-                    message.id,
-                    message
-                );
-
-            }
-
-        }
-
-        messages =
-            requestedMessageIDs
-                .map(
-                    messageID =>
-                        messageMap.get(
-                            messageID
-                        )
-                )
-                .filter(
-                    message =>
-                        !!message
-                );
-
-    }
-	
-	 /*
-     * Process every retrieved message.
-     */
-	
-	const existingTagsByMessageID =
-		new Map(
-			(album.images || [])
-				.filter(
-					image =>
-						image &&
-						image.source === "telegram" &&
-						image.messageID != null
-				)
-				.map(
-					image => [
-						String(image.messageID),
-						Array.isArray(image.tags)
-							? image.tags.slice()
-							: []
-					]
-				)
-		);
-
-    const images =
-        [];
-
-
-    let photoCount =
-        0;
-
-    let documentCount =
-        0;
-
-    let videoCount =
-        0;
-
-    let noMediaCount =
-        0;
-
-    let noFileIDCount =
-        0;
-
-
-    for (
-        const message of
-        messages
-    ) {
-
-        if (!message) {
-
-            continue;
-
-        }
-
-
-        let media =
-            null;
-
-        let fileID =
-            null;
-
-        let mimeType =
-            "";
-
-        let fileName =
-            "";
-
-        let width =
-            null;
-
-        let height =
-            null;
-
-        let mediaType =
-            "media";
-
-
-        /*
-         * PHOTO
-         */
-
-        if (
-            message.photo &&
-            typeof message.photo.fileId ===
-                "string" &&
-            message.photo.fileId
-        ) {
-
-            media =
-                message.photo;
-
-            fileID =
-                message.photo.fileId;
-
-            mimeType =
-                "image/jpeg";
-
-            width =
-                message.photo.width ??
-                null;
-
-            height =
-                message.photo.height ??
-                null;
-
-            mediaType =
-                "photo";
-
-            photoCount++;
-
-        }
-
-
-        /*
-         * DOCUMENT
-         */
-
-        else if (
-            message.document &&
-            (
-                message.document.mimeType ||
-                message.document.mime_type ||
-                ""
-            ).startsWith(
-                "image/"
-            )
-        ) {
-
-            media =
-                message.document;
-
-            if (
-                typeof media.fileId ===
-                    "string" &&
-                media.fileId
-            ) {
-
-                fileID =
-                    media.fileId;
-
-            }
-
-            mimeType =
-                media.mimeType ||
-                media.mime_type ||
-                "";
-
-            fileName =
-                media.fileName ||
-                media.file_name ||
-                "";
-
-            width =
-                media.width ??
-                null;
-
-            height =
-                media.height ??
-                null;
-
-            mediaType =
-                "document";
-
-            documentCount++;
-
-        }
-
-
-        /*
-         * VIDEO
-         */
-
-        else if (
-            message.video
-        ) {
-
-            media =
-                message.video;
-
-            if (
-                typeof media.fileId ===
-                    "string" &&
-                media.fileId
-            ) {
-
-                fileID =
-                    media.fileId;
-
-            }
-
-            mimeType =
-                media.mimeType ||
-                media.mime_type ||
-                "video/mp4";
-
-            fileName =
-                media.fileName ||
-                media.file_name ||
-                "";
-
-            width =
-                media.width ??
-                null;
-
-            height =
-                media.height ??
-                null;
-
-            mediaType =
-                "video";
-
-            videoCount++;
-
-        }
-
-
-        if (!media) {
-
-            noMediaCount++;
-
-            continue;
-
-        }
-
-
-        if (!fileID) {
-
-            noFileIDCount++;
-
-            console.warn(
-                "Telegram media has no usable fileId; " +
-                "skipping message " +
-                message.id
-            );
-
-            continue;
-
-        }
-
-
-        /*
-         * Find the smallest Telegram thumbnail.
-         */
-
-        let thumbnailFileID =
-            fileID;
-
-        let telegramThumbnail =
-            null;
-
-        if (
-            media &&
-            Array.isArray(
-                media.thumbnails
-            ) &&
-            media.thumbnails.length
-        ) {
-
-            const smallestThumbnail =
-                media.thumbnails
-                    .slice()
-                    .sort(
-                        (a, b) =>
-                            (
-                                (a.width || 0) *
-                                (a.height || 0)
-                            ) -
-                            (
-                                (b.width || 0) *
-                                (b.height || 0)
-                            )
-                    )[0];
-
-            if (
-                smallestThumbnail &&
-                typeof smallestThumbnail.fileId ===
-                    "string" &&
-                smallestThumbnail.fileId
-            ) {
-
-                thumbnailFileID =
-                    smallestThumbnail.fileId;
-
-                telegramThumbnail = {
-
-                    fileId:
-                        smallestThumbnail.fileId,
-
-                    width:
-                        smallestThumbnail.width ??
-                        null,
-
-                    height:
-                        smallestThumbnail.height ??
-                        null,
-
-                    type:
-                        smallestThumbnail.type ??
-                        null
-
-                };
-
-            }
-
-        }
-
-
-        /*
-         * Create the album item.
-         *
-         * tags starts empty and is populated asynchronously
-         * from the embedded XMP metadata below.
-         */
-
-        images.push({
-
-            source:
-                "telegram",
-
-            telegramChatID:
-                chat.id,
-
-            messageID:
-                message.id,
-
-            telegramFileID:
-                fileID,
-
-            telegramThumbnailFileID:
-                thumbnailFileID,
-
-            telegramThumbnail:
-                telegramThumbnail,
-
-            mimeType:
-                mimeType,
-
-            fileName:
-                fileName,
-
-            width:
-                width,
-
-            height:
-                height,
-
-            tags:
-				existingTagsByMessageID.get(
-					String(message.id)
-				) || [],
-
-            telegramMediaType:
-                mediaType
-
-        });
-
-    }
-
-
-    /*
-     * Store media items immediately so the gallery can
-     * begin displaying without waiting for full originals.
-     */
-
-    album.images =
-        images;
-
-
-    /*
-     * Determine cover.
-     */
-
-    let coverImage =
-        null;
-
-    if (
-        coverMessageID
-    ) {
-
-        coverImage =
-            images.find(
-                image =>
-                    String(
-                        image.messageID
-                    ) ===
-                    String(
-                        coverMessageID
-                    )
-            );
-
-    }
-
-
-    if (
-        !coverImage &&
-        images.length
-    ) {
-
-        coverImage =
-            images[0];
-
-    }
-
-
-    /*
-     * Store Telegram metadata.
-     */
-
-    album._telegramMessageIDs =
-        images.map(
-            image =>
-                image.messageID
-        );
-
-    album._telegramCoverMessageID =
-        coverImage
-            ? coverImage.messageID
-            : null;
-
-    album._telegramLoaded =
-        true;
-
-}
 
 async function initializeTelegramClient() {
 
@@ -754,525 +107,369 @@ async function initializeTelegramClient() {
 }
 
 
-async function loadTelegramAlbumCover(album) {
-
-    if (!window.telegramClient) {
-        throw new Error(
-            "Telegram client is not initialized."
-        );
-    }
-
-    const client =
-        window.telegramClient;
+/*
+ * Pulls chatId/cover/messages out of a "tg://chat/ID?cover=X&messages=
+ * Y,Z" album URL.
+ */
+function parseTelegramAlbumUrl(url) {
 
     const match =
-        album.url.match(
+        url.match(
             /^tg:\/\/chat\/(-?\d+)(?:\?(.+))?$/
         );
 
-    if (!match) {
-        throw new Error(
-            "Invalid Telegram album URL: " +
-            album.url
-        );
-    }
-
-    const chatId =
-        Number(match[1]);
-
-    const optionString =
-        match[2] ||
-        "";
+    if (!match)
+        return null;
 
     const options =
-        new URLSearchParams(
-            optionString
+        new URLSearchParams(match[2] || "");
+
+    const messages =
+        (options.get("messages") || "")
+            .split(",")
+            .map(id => Number(id))
+            .filter(id => Number.isInteger(id) && id > 0);
+
+    return {
+        chatId: Number(match[1]),
+        cover: options.get("cover"),
+        messages
+    };
+
+}
+
+
+/*
+ * Finds a chat by ID, using window.telegramChats as a cache (shared
+ * with the chat-picker dialog) before falling back to a fresh
+ * getChats() call.
+ */
+async function findTelegramChat(chatId) {
+
+    if (!window.telegramClient) {
+
+        throw new Error(
+            "Telegram client is not initialized."
         );
 
-    const coverMessageID =
-        options.get("cover");
+    }
 
-    const messageIDs =
-        options.get("messages");
-
-    let chat =
-        null;
-
-    if (
-        Array.isArray(
-            window.telegramChats
-        )
-    ) {
+    if (Array.isArray(window.telegramChats)) {
 
         const found =
             window.telegramChats.find(
                 item =>
                     item &&
                     item.chat &&
-                    String(item.chat.id) ===
-                        String(chatId)
+                    String(item.chat.id) === String(chatId)
             );
 
-        if (found) {
-            chat =
-                found.chat;
-        }
+        if (found)
+            return found.chat;
+
     }
 
-    if (!chat) {
+    const chats =
+        await window.telegramClient.getChats({ limit: 500 });
 
-        const chats =
-            await client.getChats();
+    window.telegramChats =
+        chats;
 
-        window.telegramChats =
-            chats;
-
-        const found =
-            chats.find(
-                item =>
-                    item &&
-                    item.chat &&
-                    String(item.chat.id) ===
-                        String(chatId)
-            );
-
-        if (found) {
-            chat =
-                found.chat;
-        }
-    }
-
-    if (!chat) {
-        throw new Error(
-            "Telegram chat was not found: " +
-            chatId
+    const found =
+        chats.find(
+            item =>
+                item &&
+                item.chat &&
+                String(item.chat.id) === String(chatId)
         );
+
+    if (!found) {
+
+        throw new Error(
+            "Telegram chat was not found: " + chatId
+        );
+
+    }
+
+    return found.chat;
+
+}
+
+
+/*
+ * Builds the {thumb, medium, full} field set for one Telegram message,
+ * keyed the same way regardless of size -- only "toggle" (thumbnail
+ * vs original) differs. What key1/key2 actually mean is entirely up
+ * to config.providers.telegram's blueprint; chat ID + message ID is
+ * enough for a worker to look the message up and serve whichever
+ * variant is asked for.
+ */
+function buildTelegramSourceFields(chatId, messageId) {
+
+    const fields = {
+        key1: String(chatId),
+        key2: String(messageId)
+    };
+
+    return {
+        thumb: { ...fields, toggle: true },
+        medium: { ...fields },
+        full: { ...fields }
+    };
+
+}
+
+
+/*
+ * Loads (or reloads) a Telegram album's image list. Only contacts
+ * Telegram to enumerate which messages exist and carry media --
+ * nothing here downloads any image bytes.
+ */
+async function loadTelegramAlbum(album) {
+
+    if (!window.telegramClient) {
+
+        throw new Error(
+            "Telegram client is not initialized."
+        );
+
+    }
+
+    const client =
+        window.telegramClient;
+
+    const parsed =
+        parseTelegramAlbumUrl(album.url);
+
+    if (!parsed) {
+
+        throw new Error(
+            "Invalid Telegram album URL: " + album.url
+        );
+
+    }
+
+    const chat =
+        await findTelegramChat(parsed.chatId);
+
+    let messages =
+        [];
+
+    if (parsed.messages.length) {
+
+        messages =
+            await client.getMessages(chat.id, parsed.messages);
+
+    } else {
+
+        messages =
+            await client.getHistory(chat.id, { limit: 100 });
+
+    }
+
+    if (parsed.messages.length) {
+
+        const messageMap =
+            new Map();
+
+        for (const message of messages) {
+
+            if (message && Number.isInteger(message.id))
+                messageMap.set(message.id, message);
+
+        }
+
+        messages =
+            parsed.messages
+                .map(id => messageMap.get(id))
+                .filter(message => !!message);
+
     }
 
     /*
-     * Choose exactly one message.
-     *
-     * If a cover was explicitly specified, use it.
-     * Otherwise choose one message ID locally so we
-     * never request the entire album just to choose
-     * a random cover.
+     * Preserve tags already assigned to existing entries (e.g. from a
+     * previous XMP extraction pass) when a saved Telegram album is
+     * reopened, keyed by message ID.
      */
+    const existingTagIndicesByMessageID =
+        new Map();
+
+    if (album.images && typeof album.images === "object") {
+
+        for (const number of Object.keys(album.images)) {
+
+            const entry =
+                album.images[number];
+
+            const telegramSource =
+                entry?.[0];
+
+            const messageId =
+                telegramSource?.full?.key2;
+
+            if (messageId != null) {
+
+                existingTagIndicesByMessageID.set(
+                    String(messageId),
+                    Array.isArray(entry.tags) ? entry.tags : []
+                );
+
+            }
+
+        }
+
+    }
+
+    const images =
+        {};
+
+    let nextNumber =
+        1;
+
+    for (const message of messages) {
+
+        if (!message)
+            continue;
+
+        const hasMedia =
+            (
+                message.photo &&
+                typeof message.photo.fileId === "string" &&
+                message.photo.fileId
+            ) ||
+            (
+                message.document &&
+                (
+                    message.document.mimeType ||
+                    message.document.mime_type ||
+                    ""
+                ).startsWith("image/")
+            ) ||
+            !!message.video;
+
+        if (!hasMedia)
+            continue;
+
+        images[nextNumber] = {
+            0: buildTelegramSourceFields(chat.id, message.id),
+            tags:
+                existingTagIndicesByMessageID.get(String(message.id)) || []
+        };
+
+        nextNumber++;
+
+    }
+
+    album.sources =
+        ["telegram"];
+
+    album.images =
+        images;
+
+    album._telegramMessageIDs =
+        Object.values(images).map(
+            entry => Number(entry[0].full.key2)
+        );
+
+}
+
+
+/*
+ * Picks a cover for the home page: an explicit cover=, otherwise a
+ * random pick from the messages= list (no Telegram contact needed
+ * either way), otherwise -- only if the album URL carries neither --
+ * a small history request to pick from. Always resolves to a plain
+ * URL through the provider blueprint; no raw thumbnail download.
+ */
+async function loadTelegramAlbumCover(album) {
+
+    const parsed =
+        parseTelegramAlbumUrl(album.url);
+
+    if (!parsed) {
+
+        throw new Error(
+            "Invalid Telegram album URL: " + album.url
+        );
+
+    }
+
     let selectedMessageID =
         null;
 
-    if (coverMessageID) {
+    if (parsed.cover) {
 
         selectedMessageID =
-            Number(
-                coverMessageID
+            Number(parsed.cover);
+
+    } else if (parsed.messages.length) {
+
+        selectedMessageID =
+            parsed.messages[
+                Math.floor(Math.random() * parsed.messages.length)
+            ];
+
+    } else {
+
+        if (!window.telegramClient) {
+
+            throw new Error(
+                "Telegram client is not initialized."
             );
 
-    }
-    else if (messageIDs) {
-
-        const ids =
-            messageIDs
-                .split(",")
-                .map(
-                    id =>
-                        Number(id)
-                )
-                .filter(
-                    id =>
-                        Number.isInteger(id) &&
-                        id > 0
-                );
-
-        if (ids.length) {
-
-            selectedMessageID =
-                ids[
-                    Math.floor(
-                        Math.random() *
-                        ids.length
-                    )
-                ];
         }
-    }
 
-    /*
-     * If there were no message IDs in the URL,
-     * fall back to a small history request.
-     */
-    let message =
-        null;
-
-    if (selectedMessageID) {
-
-        message =
-            await client.getMessage(
-                chat.id,
-                selectedMessageID
-            );
-
-    }
-    else {
+        const chat =
+            await findTelegramChat(parsed.chatId);
 
         const history =
-            await client.getHistory(
-                chat.id,
-                {
-                    limit:
-                        20
-                }
-            );
+            await window.telegramClient.getHistory(chat.id, { limit: 20 });
 
         const imageMessages =
             history.filter(
                 candidate =>
                     candidate &&
-                    (
-                        candidate.document ||
-                        candidate.photo
-                    )
+                    (candidate.document || candidate.photo)
             );
 
         if (!imageMessages.length) {
+
             throw new Error(
                 "Telegram album contains no image messages."
             );
-        }
 
-        message =
-            imageMessages[
-                Math.floor(
-                    Math.random() *
-                    imageMessages.length
-                )
-            ];
+        }
 
         selectedMessageID =
             Number(
-                message.id
+                imageMessages[
+                    Math.floor(Math.random() * imageMessages.length)
+                ].id
             );
+
     }
 
-    if (!message) {
+    const url =
+        resolveProviderUrl(
+            "telegram",
+            { key1: String(parsed.chatId), key2: String(selectedMessageID), toggle: true }
+        );
+
+    if (!url) {
+
         throw new Error(
-            "Telegram cover message was not found."
+            "No \"telegram\" provider is configured."
         );
+
     }
-
-    /*
-     * Download a thumbnail from a raw Telegram
-     * messageMediaDocument/messageMediaPhoto.
-     *
-     * This is intentionally based on the raw MTProto
-     * representation because that is the structure
-     * which is guaranteed to contain the current
-     * file_reference and thumbnail information.
-     */
-    async function downloadRawMediaThumbnail(
-        rawMessage
-    ) {
-
-        if (
-            !rawMessage ||
-            !rawMessage.media
-        ) {
-            throw new Error(
-                "Telegram cover message has no media."
-            );
-        }
-
-        let location =
-            null;
-
-        if (
-            rawMessage.media._ ===
-                "messageMediaDocument"
-        ) {
-
-            const document =
-                rawMessage.media.document;
-
-            if (
-                !document ||
-                document._ !==
-                    "document"
-            ) {
-                throw new Error(
-                    "Telegram cover document is unavailable."
-                );
-            }
-
-            const thumbs =
-                Array.isArray(
-                    document.thumbs
-                )
-                    ? document.thumbs.filter(
-                        thumb =>
-                            thumb &&
-                            (
-                                thumb._ ===
-                                    "photoSize" ||
-                                thumb._ ===
-                                    "photoCachedSize"
-                            )
-                    )
-                    : [];
-
-            if (!thumbs.length) {
-                throw new Error(
-                    "Telegram cover has no thumbnail."
-                );
-            }
-
-            const thumbnail =
-                thumbs
-                    .slice()
-                    .sort(
-                        (a, b) =>
-                            (
-                                (b.w || 0) *
-                                (b.h || 0)
-                            ) -
-                            (
-                                (a.w || 0) *
-                                (a.h || 0)
-                            )
-                    )[0];
-
-            if (
-                thumbnail._ ===
-                    "photoCachedSize"
-            ) {
-
-                return new Blob(
-                    [
-                        thumbnail.bytes
-                    ],
-                    {
-                        type:
-                            "image/jpeg"
-                    }
-                );
-            }
-
-            location = {
-                _:
-                    "inputDocumentFileLocation",
-
-                id:
-                    document.id,
-
-                access_hash:
-                    document.access_hash,
-
-                file_reference:
-                    document.file_reference ||
-                        new Uint8Array(),
-
-                thumb_size:
-                    thumbnail.type ||
-                    ""
-            };
-        }
-
-        else if (
-            rawMessage.media._ ===
-                "messageMediaPhoto"
-        ) {
-
-            const photo =
-                rawMessage.media.photo;
-
-            if (
-                !photo ||
-                photo._ !==
-                    "photo"
-            ) {
-                throw new Error(
-                    "Telegram cover photo is unavailable."
-                );
-            }
-
-            const sizes =
-                Array.isArray(
-                    photo.sizes
-                )
-                    ? photo.sizes.filter(
-                        size =>
-                            size &&
-                            (
-                                size._ ===
-                                    "photoSize" ||
-                                size._ ===
-                                    "photoCachedSize"
-                            )
-                    )
-                    : [];
-
-            if (!sizes.length) {
-                throw new Error(
-                    "Telegram cover has no thumbnail."
-                );
-            }
-
-            const thumbnail =
-                sizes
-                    .slice()
-                    .sort(
-                        (a, b) =>
-                            (
-                                (b.w || 0) *
-                                (b.h || 0)
-                            ) -
-                            (
-                                (a.w || 0) *
-                                (a.h || 0)
-                            )
-                    )[0];
-
-            if (
-                thumbnail._ ===
-                    "photoCachedSize"
-            ) {
-
-                return new Blob(
-                    [
-                        thumbnail.bytes
-                    ],
-                    {
-                        type:
-                            "image/jpeg"
-                    }
-                );
-            }
-
-            location = {
-                _:
-                    "inputPhotoFileLocation",
-
-                id:
-                    photo.id,
-
-                access_hash:
-                    photo.access_hash,
-
-                file_reference:
-                    photo.file_reference ||
-                        new Uint8Array(),
-
-                thumb_size:
-                    thumbnail.type ||
-                    ""
-            };
-        }
-
-        else {
-
-            throw new Error(
-                "Telegram cover message is not an image."
-            );
-        }
-
-        if (!location) {
-            throw new Error(
-                "Telegram cover thumbnail location could not be created."
-            );
-        }
-
-        const chunks =
-            await downloadTelegramLocationRaw(
-                location,
-                {
-                    chunkSize:
-                        64 * 1024
-                }
-            );
-
-        if (
-            !chunks ||
-            !chunks.length
-        ) {
-            throw new Error(
-                "Telegram returned an empty cover thumbnail."
-            );
-        }
-
-        return new Blob(
-            chunks,
-            {
-                type:
-                    "image/jpeg"
-            }
-        );
-    }
-
-    /*
-     * Always refresh this ONE selected message.
-     *
-     * This is the important difference from the
-     * original problematic version: we refresh only
-     * the randomly selected message, never all
-     * messages in the album.
-     *
-     * It also restores the raw-media handling from
-     * the version that was known to work.
-     */
-    const inputChannel =
-        await client.getInputChannel(
-            chat.id
-        );
-
-    const result =
-        await client.invoke({
-            _:
-                "channels.getMessages",
-
-            channel:
-                inputChannel,
-
-            id: [
-                {
-                    _:
-                        "inputMessageID",
-
-                    id:
-                        selectedMessageID
-                }
-            ]
-        });
-
-    const rawMessage =
-        Array.isArray(
-            result?.messages
-        )
-            ? result.messages.find(
-                item =>
-                    item &&
-                    Number(item.id) ===
-                        selectedMessageID
-            )
-            : null;
-
-    if (!rawMessage) {
-        throw new Error(
-            "Telegram cover message could not be refreshed."
-        );
-    }
-
-    const blob =
-        await downloadRawMediaThumbnail(
-            rawMessage
-        );
 
     return {
-        url:
-            URL.createObjectURL(
-                blob
-            ),
-
-        messageID:
-            selectedMessageID
+        url,
+        messageID: selectedMessageID
     };
+
 }
+
 
 async function populateTelegramAlbumChats(select) {
 
@@ -1464,6 +661,152 @@ async function populateTelegramAlbumChats(select) {
 }
 
 
+/*
+ * Fetches an image's "full" URL (via the normal provider-candidate
+ * resolution) and extracts any XMP dc:subject tags embedded in the
+ * bytes, adding newly-seen tags to album.tags and recording each
+ * image's tags as indices into it -- same storage shape as any other
+ * album. This is the one place that still needs the actual image
+ * bytes in the browser (to read embedded metadata), but it's a plain
+ * fetch() against the resolved provider URL now, not raw MTProto.
+ */
+async function extractTelegramXMPTags(album) {
+
+    const images =
+        buildImagesArray(album);
+
+    const tagIndexByName =
+        new Map(
+            (album.tags || []).map((tag, index) => [tag.toLowerCase(), index])
+        );
+
+    function tagIndexFor(tagName) {
+
+        const key =
+            tagName.toLowerCase();
+
+        if (tagIndexByName.has(key))
+            return tagIndexByName.get(key);
+
+        album.tags =
+            album.tags || [];
+
+        const index =
+            album.tags.length;
+
+        album.tags.push(tagName);
+
+        tagIndexByName.set(key, index);
+
+        return index;
+
+    }
+
+    const BATCH_SIZE =
+        10;
+
+    for (let i = 0; i < images.length; i += BATCH_SIZE) {
+
+        const batch =
+            images.slice(i, i + BATCH_SIZE);
+
+        await Promise.all(
+            batch.map(async image => {
+
+                try {
+
+                    const url =
+                        getBestGuessImageURL(album, image, "full");
+
+                    if (!url)
+                        return;
+
+                    const response =
+                        await fetch(url);
+
+                    if (!response.ok)
+                        return;
+
+                    const buffer =
+                        await response.arrayBuffer();
+
+                    const metadata =
+                        await getTelegramXMPMetadata(buffer);
+
+                    const subjects =
+                        uniqueTags(metadata?.xmptags?.subject || []);
+
+                    image.tags =
+                        subjects.map(tag => tagIndexFor(tag));
+
+                } catch (error) {
+
+                    console.warn(
+                        "Failed to extract XMP for a Telegram image",
+                        error
+                    );
+
+                }
+
+            })
+        );
+
+    }
+
+}
+
+
+function uniqueTags(tags) {
+
+    const result = [];
+    const seen = new Set();
+
+    for (
+        const tag of
+        Array.isArray(tags)
+            ? tags
+            : []
+    ) {
+
+        if (
+            typeof tag !==
+            "string"
+        ) {
+
+            continue;
+
+        }
+
+        const clean =
+            tag.trim();
+
+        if (!clean) {
+            continue;
+        }
+
+        const key =
+            clean.toLowerCase();
+
+        if (
+            seen.has(key)
+        ) {
+
+            continue;
+
+        }
+
+        seen.add(key);
+
+        result.push(
+            clean
+        );
+
+    }
+
+    return result;
+}
+
+
 async function openTemporaryTelegramAlbum(chatID) {
 
     if (!chatID) {
@@ -1480,60 +823,8 @@ async function openTemporaryTelegramAlbum(chatID) {
         const client =
             window.telegramClient;
 
-
-        /*
-         * Find the selected chat.
-         */
-
-        let chat = null;
-
-        if (Array.isArray(window.telegramChats)) {
-
-            const found =
-                window.telegramChats.find(
-                    item =>
-                        item &&
-                        item.chat &&
-                        String(item.chat.id) ===
-                        String(chatID)
-                );
-
-            if (found) {
-                chat = found.chat;
-            }
-        }
-
-        if (!chat) {
-
-            const chats =
-                await client.getChats({
-                    limit: 500
-                });
-
-            window.telegramChats =
-                chats;
-
-            const found =
-                chats.find(
-                    item =>
-                        item &&
-                        item.chat &&
-                        String(item.chat.id) ===
-                        String(chatID)
-                );
-
-            if (found) {
-                chat = found.chat;
-            }
-        }
-
-        if (!chat) {
-            throw new Error(
-                "Telegram chat was not found: " +
-                chatID
-            );
-        }
-
+        const chat =
+            await findTelegramChat(chatID);
 
         /*
          * Retrieve the ENTIRE chat history.
@@ -1699,8 +990,8 @@ async function openTemporaryTelegramAlbum(chatID) {
 
             return;
         }
-		
-		const messageIDs =
+
+        const messageIDs =
 			targetMessages.map(
 				message =>
 					message.id
@@ -1708,7 +999,7 @@ async function openTemporaryTelegramAlbum(chatID) {
 
 
         const coverMessageID =
-            targetMessages[0].id;
+            messageIDs[0];
 
 
         const telegramURL =
@@ -1752,8 +1043,11 @@ async function openTemporaryTelegramAlbum(chatID) {
             tags:
                 [],
 
+            sources:
+                ["telegram"],
+
             images:
-                [],
+                {},
 
             temporary:
                 true,
@@ -1764,7 +1058,7 @@ async function openTemporaryTelegramAlbum(chatID) {
 
         currentTemporaryAlbumID =
             album.id;
-			
+
 		setTelegramImportSavingState(true);
 
 
@@ -1779,10 +1073,8 @@ async function openTemporaryTelegramAlbum(chatID) {
 
 
         /*
-         * Load the actual Telegram media.
-         *
-         * loadTelegramAlbum() does NOT perform any XMP
-         * processing. It only creates the image records.
+         * Build the image list (chat/message discovery only -- no
+         * media bytes downloaded here).
          */
 
         await loadAlbum(
@@ -1791,46 +1083,29 @@ async function openTemporaryTelegramAlbum(chatID) {
         );
 
         /*
-		 * Wait until every image has gone through the normal
-		 * medium/full Telegram loading path.
-		 *
-		 * Telegram's "medium" loader downloads the full original,
-		 * and the Telegram image source extracts XMP from that
-		 * same Blob before returning the image URL.
-		 */
-		await waitForMediumLoading();
-		
+         * Now fetch each image's bytes exactly once, to read embedded
+         * XMP tags -- via the normal provider URL (your Worker),
+         * not raw MTProto.
+         */
+        await extractTelegramXMPTags(album);
+
+        buildImagesArray(album);
+
 		setTelegramImportSavingState(false);
 
-		const allTags = [];
-		for (const image of album.images) {
-			for (const tag of image.tags || []) {
-				allTags.push(tag);
-			}
-		}
-		album.tags = uniqueTags(allTags);
-
 		console.log(
-			"[Telegram TEMP] Medium loading complete; saving album",
+			"[Telegram TEMP] XMP extraction complete; saving album",
 			{
-				images: album.images.length,
-				imagesWithTags: album.images.filter(
+				images: album._imagesArray.length,
+				imagesWithTags: album._imagesArray.filter(
 					image =>
 						Array.isArray(image.tags) &&
 						image.tags.length
-				).length,
-				totalTags: album.images.reduce(
-					(count, image) =>
-						count +
-						(
-							Array.isArray(image.tags)
-								? image.tags.length
-								: 0
-						),
-					0
-				)
+				).length
 			}
 		);
+
+		buildTagList(album.tags || []);
 
 		saveTemporaryAlbum(album);
 		showAlbumButtons(true);
@@ -1854,54 +1129,4 @@ async function openTemporaryTelegramAlbum(chatID) {
         );
     }
 
-}
-
-function uniqueTags(tags) {
-
-    const result = [];
-    const seen = new Set();
-
-    for (
-        const tag of
-        Array.isArray(tags)
-            ? tags
-            : []
-    ) {
-
-        if (
-            typeof tag !==
-            "string"
-        ) {
-
-            continue;
-
-        }
-
-        const clean =
-            tag.trim();
-
-        if (!clean) {
-            continue;
-        }
-
-        const key =
-            clean.toLowerCase();
-
-        if (
-            seen.has(key)
-        ) {
-
-            continue;
-
-        }
-
-        seen.add(key);
-
-        result.push(
-            clean
-        );
-
-    }
-
-    return result;
 }

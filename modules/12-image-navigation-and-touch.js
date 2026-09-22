@@ -292,7 +292,7 @@ window.addEventListener("popstate", async () => {
                 query.substring(1);
 
             const album =
-                getTemporaryAlbum(albumID);
+                await getTemporaryAlbum(albumID);
 
             if (
                 album
@@ -330,8 +330,32 @@ window.addEventListener("popstate", async () => {
 
         }
 
-        const albumQuery =
-            createQueryAlbum(query);
+        let albumQuery =
+            null;
+
+        try {
+
+            albumQuery =
+                await decompressAlbum(query);
+
+        } catch (error) {
+
+            alert(
+                "This album link couldn't be read:\n\n" +
+                (
+                    error && error.message
+                        ? error.message
+                        : String(error)
+                )
+            );
+
+            await showAlbums();
+
+            fadeInCurrentView();
+
+            return;
+
+        }
 
         const layoutReady =
             waitForAlbumLayout();

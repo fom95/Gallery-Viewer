@@ -1281,16 +1281,19 @@ function showZoomLevel() {
 
 function showImage(offset) {
 
-    if (
-        !currentAlbum ||
-        !currentAlbum.images ||
-        !currentAlbum.images.length
-    ) {
+    if (!currentAlbum) {
+        return;
+    }
+
+    const images =
+        currentAlbum._imagesArray || buildImagesArray(currentAlbum);
+
+    if (!images.length) {
         return;
     }
 
     const total =
-        currentAlbum.images.length;
+        images.length;
 
     let index =
         currentImageIndex;
@@ -1308,30 +1311,17 @@ function showImage(offset) {
         }
 
         const img =
-            currentAlbum.images[index];
+            images[index];
 
         if (!img) {
             continue;
         }
 
-        const isTelegramImage =
-            img.source === "telegram";
+        const urls =
+            getImageURLs(img, currentAlbum);
 
-        if (isTelegramImage) {
-
-            if (!img.telegramFileID) {
-                continue;
-            }
-
-        }
-        else {
-
-            const urls = getImageURLs(img);
-
-            if (!urls.thumb) {
-                continue;
-            }
-
+        if (!urls.thumb) {
+            continue;
         }
 
         const thumb =
@@ -1347,14 +1337,9 @@ function showImage(offset) {
         currentImageIndex =
             index;
 
-        const urls = getImageURLs(img);
-        const thumbSrc = isTelegramImage ? "" : urls.thumb;
-        const mediumSrc = isTelegramImage ? "" : urls.medium;
-        const fullSrc = isTelegramImage ? "" : urls.full;
-
         scrollToCurrentThumbnail(index);
         scheduleThumbnailVisibilityCheck();
-        openModal(thumbSrc, mediumSrc, fullSrc, thumb);
+        openModal(urls.thumb, urls.medium, urls.full, thumb);
 
         return;
     }

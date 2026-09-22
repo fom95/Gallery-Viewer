@@ -9,22 +9,30 @@ const TEMP_ALBUM_STORAGE_KEY =
     "temporaryAlbums";
 
 
-function getTemporaryAlbums() {
+function getTemporaryAlbumsRaw() {
 
-    return JSON.parse(
-        localStorage.getItem(TEMP_ALBUM_STORAGE_KEY) || "{}"
-    );
+    try {
+
+        return JSON.parse(
+            localStorage.getItem(TEMP_ALBUM_STORAGE_KEY) || "{}"
+        );
+
+    } catch {
+
+        return {};
+
+    }
 
 }
 
 
-function saveTemporaryAlbum(album) {
+async function saveTemporaryAlbum(album) {
 
     const temporaryAlbums =
-        getTemporaryAlbums();
+        getTemporaryAlbumsRaw();
 
     temporaryAlbums[album.id] =
-        album;
+        await compressAlbum(album);
 
     localStorage.setItem(
         TEMP_ALBUM_STORAGE_KEY,
@@ -34,13 +42,35 @@ function saveTemporaryAlbum(album) {
 }
 
 
-function getTemporaryAlbum(id) {
+async function getTemporaryAlbum(id) {
 
     const temporaryAlbums =
-        getTemporaryAlbums();
+        getTemporaryAlbumsRaw();
 
-    return temporaryAlbums[id] ||
-        null;
+    const compressed =
+        temporaryAlbums[id];
+
+    if (!compressed)
+        return null;
+
+    try {
+
+        return await decompressAlbum(compressed);
+
+    } catch (error) {
+
+        console.debug(
+            "[ALBUMS] Failed to decompress a temporary album",
+            {
+                id,
+                errorName: error?.name,
+                errorMessage: error?.message
+            }
+        );
+
+        return null;
+
+    }
 
 }
 
@@ -51,7 +81,7 @@ function deleteTemporaryAlbum(id) {
         return;
 
     const temporaryAlbums =
-        getTemporaryAlbums();
+        getTemporaryAlbumsRaw();
 
     if (
         !temporaryAlbums[id]
@@ -67,6 +97,79 @@ function deleteTemporaryAlbum(id) {
         TEMP_ALBUM_STORAGE_KEY,
         JSON.stringify(temporaryAlbums)
     );
+
+}
+
+
+/*
+ * A pasted album URL's query string is a compressed album blob
+ * directly (same format as the ad-hoc share links initAlbums() reads
+ * -- see 01-album-routing-and-parsing.js), so opening one just means
+ * decompressing it and treating it as a temporary album.
+ */
+async function openTemporaryAlbumFromURL(url) {
+
+    if (!url)
+        return;
+
+    const query =
+        getAlbumQuery(url.trim());
+
+    if (!query) {
+
+        alert("No album data was found in that URL.");
+
+        return;
+
+    }
+
+    let album =
+        null;
+
+    try {
+
+        album =
+            await decompressAlbum(query);
+
+    } catch (error) {
+
+        alert(
+            "That album link couldn't be read:\n\n" +
+            (
+                error && error.message
+                    ? error.message
+                    : String(error)
+            )
+        );
+
+        return;
+
+    }
+
+    const id =
+        generateAlbumID(album.name || "Shared Album");
+
+    album.id =
+        id;
+
+    album.temporary =
+        true;
+
+    currentTemporaryAlbumID =
+        id;
+
+    await saveTemporaryAlbum(album);
+
+    history.pushState(
+        null,
+        "",
+        "?=" +
+        encodeURIComponent(id)
+    );
+
+    loadAlbum(album, false);
+
+    showAlbumButtons(true);
 
 }
 
@@ -183,7 +286,7 @@ function openAlbumInput() {
 
             overlay.remove();
 
-            openTemporaryAlbumFromURL(value);
+            await openTemporaryAlbumFromURL(value);
 
         };
 

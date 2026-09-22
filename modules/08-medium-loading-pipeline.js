@@ -96,7 +96,7 @@ function rebuildMediumQueue(prioritizeVisible = false, includeFailed = true) {
         const thumbnail = thumbnailItems.find(entry => entry.index === item.index);
         if (!thumbnail || !thumbnail.loaded)
             return false;
-        return !!item.src || item.source === "telegram";
+        return !!item.src;
     });
 
     const failed = eligible.filter(item => item.mediumFailed);
@@ -402,21 +402,22 @@ function prioritizeVisibleMediums() {
 /*
  * How many Telegram medium images load at once. Raise or lower this
  * one number to change the batch size -- everything else scales off
- * it. Kept separate from TELEGRAM_THUMBNAIL_BATCH_SIZE (07-thumbnail-
- * loading-pipeline.js) since medium/full images are larger and you
- * may want a different number for them.
+ * it. Kept separate from THUMBNAIL_BATCH_SIZE (07-thumbnail-loading-
+ * pipeline.js) since medium/full images are larger and you may want a
+ * different number for them. Every source is a plain HTTP URL now, so
+ * there's no reason to treat any album differently.
  */
-const TELEGRAM_MEDIUM_BATCH_SIZE = 25;
+const MEDIUM_BATCH_SIZE = 25;
 
 
 /*
- * Loads every eligible medium image for a Telegram album in
- * fixed-size batches (TELEGRAM_MEDIUM_BATCH_SIZE) instead of one at a
- * time, using the same loadInBatches() helper the thumbnail pipeline
- * uses. Each medium item already has its own dedicated <img> element
- * reserved for it (unlike thumbnails, which claim from a shared pool
- * of slots), so there's no slot-claiming race to worry about here --
- * batches can simply run concurrently.
+ * Loads every eligible medium image in fixed-size batches
+ * (MEDIUM_BATCH_SIZE) instead of one at a time, using the same
+ * loadInBatches() helper the thumbnail pipeline uses. Each medium
+ * item already has its own dedicated <img> element reserved for it
+ * (unlike thumbnails, which claim from a shared pool of slots), so
+ * there's no slot-claiming race to worry about here -- batches can
+ * simply run concurrently.
  *
  * Because this only runs after loadAllThumbnailsConcurrently() has
  * finished (see startThumbnailLoading()/startMediumLoading()), every
@@ -424,10 +425,6 @@ const TELEGRAM_MEDIUM_BATCH_SIZE = 25;
  * the time this computes its eligible list, so -- unlike
  * processMediumQueue() -- there's no need to repeatedly recompute
  * eligibility as more thumbnails finish loading.
- *
- * This is only used for Telegram-sourced albums (see
- * startMediumLoading()) so it doesn't change behavior for linked-
- * image albums.
  */
 function loadAllMediumsConcurrently(session) {
 
@@ -449,13 +446,13 @@ function loadAllMediumsConcurrently(session) {
             if (!thumbnail || !thumbnail.loaded)
                 return false;
 
-            return !!item.src || item.source === "telegram";
+            return !!item.src;
 
         });
 
     loadInBatches(
         eligible,
-        TELEGRAM_MEDIUM_BATCH_SIZE,
+        MEDIUM_BATCH_SIZE,
         item => loadMedium(item, session),
         () => session === mediumLoadSession
     ).then(() => {
@@ -542,26 +539,7 @@ function startMediumLoading() {
 
         });
 
-    const isTelegramAlbum =
-        typeof currentAlbum?.url === "string" &&
-        currentAlbum.url.startsWith("tg://chat/");
-
-    if (isTelegramAlbum) {
-
-        loadAllMediumsConcurrently(session);
-
-    } else {
-
-        rebuildMediumQueue(
-            false,
-            true
-        );
-
-        processMediumQueue(
-            session
-        );
-
-    }
+    loadAllMediumsConcurrently(session);
 }
 
 function waitForMediumLoading() {

@@ -229,46 +229,78 @@ function openAddImageEditor() {
                 medium ||
                 thumb;
 
-            const newImage = {
-
-				thumb: {
-					url:
-						thumb ||
-						fallback
-				},
-
-				medium: {
-					url:
-						medium ||
-						image ||
-						fallback
-				},
-
-				image: {
-					url:
-						image ||
-						medium ||
-						fallback
-				},
-
-				tags:
-					[],
-
-				added:
-					true
-
-			};
-
             if (
-                !Array.isArray(currentAlbum.images)
+                !Array.isArray(currentAlbum.sources)
             ) {
 
-                currentAlbum.images =
+                currentAlbum.sources =
                     [];
 
             }
 
-            currentAlbum.images.push(newImage);
+            let directIndex =
+                currentAlbum.sources.indexOf("direct");
+
+            if (directIndex === -1) {
+
+                directIndex =
+                    currentAlbum.sources.length;
+
+                currentAlbum.sources.push("direct");
+
+            }
+
+            if (
+                !currentAlbum.images ||
+                typeof currentAlbum.images !== "object"
+            ) {
+
+                currentAlbum.images =
+                    {};
+
+            }
+
+            const nextNumber =
+                (
+                    Object.keys(currentAlbum.images)
+                        .map(Number)
+                        .filter(Number.isFinite)
+                        .reduce((max, n) => Math.max(max, n), 0)
+                ) + 1;
+
+            currentAlbum.images[nextNumber] = {
+
+                [directIndex]: {
+
+                    thumb: {
+                        url:
+                            thumb ||
+                            fallback
+                    },
+
+                    medium: {
+                        url:
+                            medium ||
+                            image ||
+                            fallback
+                    },
+
+                    full: {
+                        url:
+                            image ||
+                            medium ||
+                            fallback
+                    }
+
+                },
+
+                tags:
+                    [],
+
+                added:
+                    true
+
+            };
 
             currentAlbum.edited =
                 true;
