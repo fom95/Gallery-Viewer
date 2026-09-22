@@ -22,6 +22,9 @@
 			<button id="saveButton" onclick="saveCurrentAlbum()" style="display:none;">
 				💾
 			</button>
+			<button id="settingsButton" onclick="openSettingsEditor()" title="Settings" style="display:none;">
+				⚙️
+			</button>
 			<button id="backButton" onclick="returnToAlbums()" style="display:none;">
 				←
 			</button>
@@ -85,6 +88,7 @@
 
     const moduleFiles = [
         "00-state-and-config.js",
+        "00b-config-and-providers.js",
         "01-album-routing-and-parsing.js",
         "02-albums-home-view.js",
         "03-temporary-albums-and-import-dialog.js",
@@ -105,6 +109,7 @@
         "18-reload-albums-and-persistence.js",
         "19-album_editing.js",
         "20-view-transitions.js",
+        "21-config-editor.js",
         "99-bootstrap.js"
     ];
 
