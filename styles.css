@@ -1,20 +1,155 @@
-html.pageLoading body {
+:root {
+    --nav-h: clamp(44px, 7vw, 74px);
+    --bottom-h: clamp(30px, 3.5vw, 40px);
+    --surface: #1d1d22;
+    --surface-2: #26262b;
+    --line: rgba(255, 255, 255, 0.08);
+    --album-edit-speed: 0.22s;
+
+    /*
+     * One colour for every "this came from local storage" marker:
+     * home cards, album edit button, changed edit fields, changed
+     * tiles, changed image URLs and newly added tags.
+     */
+    --local-edit: #f59e0b;
+    --local-edit-strong: rgba(245, 158, 11, 0.85);
+    --local-edit-soft: rgba(245, 158, 11, 0.16);
+}
+
+html.pageLoading body > :not(#bootLoader) {
     visibility: hidden;
 }
 
+html {
+    scrollbar-width: thin;
+    scrollbar-color: #3a3a42 transparent;
+}
+
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #3a3a42;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #4a4a54;
+}
+
 body {
-    font-family: Arial, sans-serif;
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
     background: #111;
     color: #fff;
     text-align: center;
+    -webkit-font-smoothing: antialiased;
 	display: flex;
 	flex-direction: column;
 	margin: 0px;
+    padding-bottom: var(--bottom-h);
+    box-sizing: border-box;
+    max-width: 100%;
+}
+
+/*
+ * The editor keeps the document scrollable — Firefox refuses
+ * programmatic scrolling while overflow is hidden — but hides the
+ * scrollbar and swallows wheel/key/touch input. That lets arrow
+ * navigation smoothly bring the current image into view.
+ */
+html.image-editor-open {
+    overflow-y: scroll;
+    scrollbar-color: transparent transparent;
+}
+
+html.image-editor-open::-webkit-scrollbar {
+    width: 6px;
+}
+
+html.image-editor-open::-webkit-scrollbar-thumb,
+html.image-editor-open::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#addImageEditor {
+    touch-action: none;
+}
+
+#addImageEditor .image-editor-tags-scroll,
+#addImageEditor .image-editor-tag-suggestions {
+    touch-action: pan-y;
+}
+#bootLoader {
+    position: fixed;
+    inset: 0;
+    z-index: 30000;
+    background: #111;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+}
+
+html:not(.pageLoading) #bootLoader {
+    display: none;
+}
+
+.boot-spinner,
+.album-load-cover-spinner {
+    width: 34px;
+    height: 34px;
+
+    border: 3px solid rgba(255, 255, 255, 0.18);
+    border-top-color: #fff;
+    border-radius: 50%;
+
+    animation: modalSpin 0.8s linear infinite;
+}
+
+.boot-label,
+.album-load-cover-label {
+    font-size: 14px;
+    opacity: 0.75;
+}
+
+#albumLoadCover {
+    position: fixed;
+    inset: 0;
+    z-index: 15000;
+    background: #111;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+
+    transition:
+        opacity 0.18s ease,
+        visibility 0.18s ease;
+}
+
+#albumLoadCover.visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
 }
 
 #nav {
-	height: clamp(44px, 7vw, 74px);
-	width: 100vw;
+	height: var(--nav-h);
+	width: 100%;
 }
 
 #navCont {
@@ -27,166 +162,550 @@ body {
 
     z-index: 2;
 
-    background-color: rgba(0, 0, 0, 0.85);
+    background-color: rgba(12, 12, 14, 0.78);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 
     display: flex;
     align-items: center;
+    gap: clamp(6px, 0.8vw, 12px);
 
     box-sizing: border-box;
-	margin-left: 1vw;
+	padding: 0 1vw;
 }
 
 #searchCont {
 	position: relative;
 	height: inherit;
-	width: 20vw;
+	width: 20%;
     display: flex;
     align-items: center;
     flex-shrink: 0;
+    overflow: hidden;
+    transition:
+        width var(--album-edit-speed) ease,
+        opacity var(--album-edit-speed) ease;
+}
+
+#tagSearchBox {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    height: 60%;
+    box-sizing: border-box;
+    padding: 0 24px 0 6px;
+    background: #161619;
+    border: 1px solid #3a3a42;
+    border-radius: 8px;
+    transition: border-color 0.15s ease;
+}
+
+#tagSearchBox:focus-within,
+#tagSearchBox.active {
+    border-color: #3d7cff;
+}
+
+/*
+ * Bulk tag mode uses the same visible slot as the normal search box,
+ * but it is an add-tag field rather than a filter/search field.
+ */
+#bulkTagSearchBox {
+    position: relative;
+    display: none;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    height: 60%;
+    box-sizing: border-box;
+    padding: 0 8px;
+    background: #161619;
+    border: 1px solid #3a3a42;
+    border-radius: 8px;
+    transition: border-color 0.15s ease;
+}
+
+#bulkTagSearchBox:focus-within {
+    border-color: #3d7cff;
+}
+
+#bulkTagSearch {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: clamp(13px, 1vw, 16px);
+}
+
+#bulkTagSearch:focus,
+#bulkTagSearch:focus-visible {
+    outline: none;
+}
+
+#tagSearchChips {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.search-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 3px 2px 6px;
+    border-radius: 5px;
+    background: rgba(61, 124, 255, 0.18);
+    border: 1px solid rgba(61, 124, 255, 0.45);
+    color: #eaf0ff;
+    font-size: 10px;
+    line-height: 1.3;
+    flex: 0 0 auto;
+}
+
+.search-tag.negative {
+    background: rgba(200, 40, 40, 0.18);
+    border-color: rgba(220, 70, 70, 0.55);
+    color: #ffdcdc;
+}
+
+.search-tag.new {
+    background: var(--local-edit-soft);
+    border-color: var(--local-edit-strong);
+    color: #ffe6b8;
+}
+
+/*
+ * An original tag removed in the image editor. It stays visible at the
+ * end of the chip list so it can be restored, but no longer applies to
+ * the image once saved. The strikethrough uses the same amber as the
+ * other local-edit markers so the removal still reads as an edit.
+ */
+.search-tag.removed {
+    background: rgba(140, 140, 150, 0.14);
+    border-color: rgba(160, 160, 170, 0.4);
+    color: #9a9aa3;
+    text-decoration: line-through;
+    text-decoration-color: var(--local-edit);
+    text-decoration-thickness: 1px;
+}
+
+.search-tag.removed .search-tag-label {
+    text-decoration: line-through;
+    text-decoration-color: var(--local-edit);
+    text-decoration-thickness: 1px;
+}
+
+.search-tag-label {
+    white-space: nowrap;
+}
+
+.search-tag-remove {
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    font-size: 12px;
+    line-height: 1;
+    opacity: 0.7;
+}
+
+.search-tag-remove:hover {
+    background: rgba(255, 255, 255, 0.14);
+    opacity: 1;
 }
 
 #tagSearch {
-    width: inherit;
-	height: 60%;
+    flex: 1 1 50px;
+    min-width: 36px;
+    width: auto;
+    height: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
     box-sizing: border-box;
-    flex-shrink: 0;
-	font-size: 2vw;
+	font-size: clamp(13px, 1vw, 16px);
+}
+
+#tagSearch:focus,
+#tagSearch:focus-visible {
+    outline: none;
 }
 
 #clearSearch {
     position: absolute;
-    right: 6px;
+    right: 4px;
     top: 50%;
     transform: translateY(-50%);
 
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
 
     padding: 0;
     border: none;
     background: none;
 
     color: #888;
-    font-size: 18px;
-    line-height: 20px;
+    font-size: 16px;
+    line-height: 18px;
 
     cursor: pointer;
+    display: none;
+    z-index: 2;
 }
 
 #clearSearch:hover {
     color: white;
 }
 
+/* Expanded search: chips wrap and the field covers the top bar. */
+#tagSearchBox.active {
+    position: fixed;
+    left: 1vw;
+    top: calc(var(--nav-h) * 0.2);
+    width: calc(100% - 2vw - (var(--nav-h) * 0.6) - 10px);
+    height: auto;
+    min-height: calc(var(--nav-h) * 0.6);
+    flex-wrap: wrap;
+    align-items: flex-start;
+    padding: 8px 28px 8px 8px;
+    background: #1d1d22;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+    z-index: 6;
+}
+
+body.search-active #searchButton {
+    position: fixed;
+    top: calc(var(--nav-h) / 2);
+    right: 1vw;
+    transform: translateY(-50%);
+    height: calc(var(--nav-h) * 0.6);
+    margin: 0;
+    z-index: 7;
+}
+
+#tagSearchBox:not(.active) .search-tag-remove {
+    display: none;
+}
+
+/*
+ * In the collapsed box the empty input must not steal the space the
+ * chips need. With chips, hide the input; the box itself focuses it.
+ */
+#tagSearchBox:not(.active).has-chips #tagSearch {
+    flex: 0 0 0;
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    opacity: 0;
+}
+
+#tagSearchBox:not(.active).has-chips #tagSearchChips {
+    flex: 1 1 auto;
+}
+
+#tagSearchBox.active #tagSearchChips {
+    flex: 0 0 100%;
+    flex-wrap: wrap;
+    overflow: visible;
+    white-space: normal;
+}
+
+#tagSearchBox.active #tagSearch {
+    flex: 1 1 100%;
+    height: 26px;
+    padding: 2px 0;
+}
+
+#tagSearchBox.active #clearSearch {
+    right: 8px;
+    top: 10px;
+}
+
 #tagSuggestions {
     position: absolute;
-    top: 80%;
-    width: inherit;
-    background: rgba(255, 255, 255, 0.9);
-    color: black;
-    max-height: 200px;
+    top: 100%;
+    left: 0;
+    right: auto;
+    width: min(40vw, 480px);
+    min-width: 200px;
+    max-width: 100%;
+    margin-top: 4px;
+    background: #1d1d22;
+    color: #eee;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+    max-height: 220px;
     overflow-y: auto;
-    z-index: 2;
+    z-index: 7;
+}
+
+#tagSuggestions:empty {
+    display: none;
+}
+
+#bulkTagSuggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    min-width: min(220px, 80vw);
+    margin-top: 4px;
+    background: #1d1d22;
+    color: #eee;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+    max-height: min(50vh, 320px);
+    overflow-y: auto;
+    z-index: 7;
+}
+
+#bulkTagSuggestions:empty {
+    display: none;
+}
+
+#bulkTagSuggestions .suggestion {
+    padding: 6px 8px;
+}
+
+#bulkTagSuggestions .suggestion.selected {
+    background-color: #3d7cff;
+    color: #fff;
+}
+
+#searchOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    display: none;
+    background: rgba(0, 0, 0, 0.45);
+}
+
+body.search-active #searchOverlay {
+    display: block;
+}
+
+/*
+ * Keep the nav (and the search panel inside it) above the dimming
+ * overlay so the overlay blocks the page and the bottom bar only.
+ */
+body.search-active #navCont {
+    z-index: 4;
+}
+
+.suggestion.selected {
+    background: #3d7cff;
+    color: #fff;
+}
+
+#searchResultsTags {
+    display: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 1vw 0;
+    box-sizing: border-box;
+    text-align: left;
+    overflow: hidden;
+}
+
+#searchResultsTags .search-tag {
+    font-size: 12px;
+    padding: 4px 6px 4px 10px;
+    border-radius: 6px;
+}
+
+#searchResultsTags .search-tag-remove {
+    width: 16px;
+    height: 16px;
+    font-size: 13px;
 }
 
 #searchButton {
-    height: 60%;
-	aspect-ratio: 1/1;
-    margin-left: 1vw;
     flex-shrink: 0;
-	font-size: 2vw;font-size: clamp(5px, 2vw, 20px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 }
 
 #pageName {
-    margin-left: 1vw;
-	margin-right: 1vw;
+    margin: 0;
     flex: 1 1 auto;
     min-width: 0;
     white-space: nowrap;
-	/*font-size: 4vw;*/
-	overflow: clip;
+    overflow: clip;
+    text-overflow: ellipsis;
+    font-size: clamp(15px, 1.6vw, 22px);
+    font-weight: 600;
+    letter-spacing: 0.2px;
 }
 
 #EditNameButton {
-    height: 60%;
-	aspect-ratio: 1/1;
     padding: 0;
     flex-shrink: 0;
-	font-size: 2vw;font-size: clamp(5px, 2vw, 20px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 }
 
+/*
+ * An album with saved local edits gets an amber outline on the edit
+ * button so the state is visible before entering edit mode.
+ */
+#EditNameButton.album-page-edit-local {
+    color: var(--local-edit);
+    border-color: var(--local-edit-strong);
+    background: var(--local-edit-soft);
+    box-shadow: 0 0 0 1px var(--local-edit-strong) inset;
+}
+
 #saveButton {
-    height: 60%;
-	aspect-ratio: 1/1;
     padding: 0;
     flex-shrink: 0;
-	font-size: 2vw;font-size: clamp(5px, 2vw, 20px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 }
 
 #backButton {
-    height: 60%;
-	aspect-ratio: 1/1;
     flex-shrink: 0;
-	font-size: 2vw;font-size: clamp(5px, 2vw, 20px);
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	margin-right: 2vw;
 }
 
 button {
     cursor: pointer;
+    font: inherit;
+    color: #f2f2f4;
+    background: #26262b;
+    border: 1px solid #3a3a42;
+    border-radius: 6px;
+    padding: 6px 10px;
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease,
+        opacity 0.15s ease;
+}
+
+button:hover {
+    background: #33333a;
+    border-color: #4a4a54;
+}
+
+button:active {
+    background: #1f1f24;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid #3d7cff;
+    outline-offset: 2px;
+}
+
+input,
+select,
+textarea {
+    font: inherit;
+    color: #f2f2f4;
+    background: #161619;
+    border: 1px solid #3a3a42;
+    border-radius: 6px;
+    padding: 5px 7px;
+    box-sizing: border-box;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: #7c7c86;
+}
+
+/* Round icon buttons used throughout the top navigation. */
+.nav-icon {
+    height: 62%;
+    aspect-ratio: 1 / 1;
+    padding: 0;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(14px, 1.4vw, 20px);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 50%;
+}
+
+.nav-icon:hover {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.16);
 }
 
 .suggestion {
     padding: 3px 8px;
     cursor: pointer;
+    text-align: left;
 }
 
 .suggestion:hover {
-    background: #ddd;
+    background: #2e2e36;
 }
 
-##tagSuggestions .suggestion.selected {
-    background-color: #ddd;
+#tagSuggestions .suggestion.selected {
+    background-color: #3d7cff;
+    color: #fff;
 }
 
 #content {
     display: flex;
     align-items: flex-start;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
 }
 
 #tagBar {
-    width: 20vw;
-    flex: 0 0 20vw;
+    width: var(--tag-bar-width, 20%);
+    flex: 0 0 var(--tag-bar-width, 20%);
     box-sizing: border-box;
 
     display: flex;
     flex-direction: column;
 
     position: sticky;
-    top: 85px;
+    top: calc(var(--nav-h) + 1vw);
 
-    max-height: calc(81vh - 10px);
+    max-height: calc(100vh - var(--nav-h) - var(--bottom-h) - 2vw);
     margin-top: 1vw;
-	margin-left: 1vw;
+	margin-left: 1%;
 	
     opacity: 1;
 	overflow: hidden;
 
     transition:
-        width 0.3s ease,
-        flex-basis 0.3s ease,
-        padding 0.3s ease,
-        opacity 0.3s ease;
+        width var(--album-edit-speed) ease,
+        flex-basis var(--album-edit-speed) ease,
+        padding var(--album-edit-speed) ease,
+        opacity var(--album-edit-speed) ease;
 	visibility: hidden;
 }
 
@@ -201,39 +720,466 @@ button {
     transition: none !important;
 }
 
-#filterMode {
+#tagFilterPane {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+#bulkTagSummary {
+    display: none;
+    flex-direction: column;
+    min-height: 0;
     margin-bottom: 8px;
-    flex-shrink: 0;
-	flex: 1;
+}
+
+.bulk-tag-summary-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    opacity: 0.75;
+    text-align: left;
+}
+
+#bulkTagSelectedCount {
+    flex: 0 0 auto;
+    opacity: 0.8;
+}
+
+#bulkTagTopStatus {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    height: 60%;
+    margin-left: auto;
+}
+
+body.bulk-tagging #bulkTagTopStatus {
+    display: flex;
+}
+
+#bulkTagTopStatus #bulkTagSelectedCount {
+    white-space: nowrap;
+    font-size: clamp(11px, 1vw, 13px);
+}
+
+#bulkTagClearSelection {
+    flex: 0 0 auto;
+    padding: 3px 10px;
+    font-size: 11px;
+}
+
+#bulkTagModeLabel {
+    display: none;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 60%;
+    align-items: center;
+    font-size: clamp(15px, 1.6vw, 22px);
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    overflow: clip;
+    text-overflow: ellipsis;
+}
+
+body.bulk-tagging #bulkTagModeLabel {
+    display: flex;
+    justify-content: center;
+    text-align: center;
+}
+
+body.bulk-tagging .album-edit-title-input {
+    display: none !important;
+}
+
+#bulkTagFilterToggle {
+    flex: 0 0 auto;
+    min-width: 26px;
+    padding: 3px 7px;
+    font-size: 11px;
+    display: none;
+}
+
+#bulkTagChips {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding-right: 2px;
+}
+
+#bulkTagChips::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+}
+
+/*
+ * Tagging sheet: slides up from behind the bottom bar. The bottom bar
+ * itself keeps the centred caret and the Save/Cancel actions.
+ */
+#bulkTagSheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+
+    /* Whole chrome bar + menu slide up from the screen bottom. */
+    bottom: 0;
+    z-index: 3;
+
+    /*
+     * The height is driven by the shared UI setting so it can be
+     * dragged and persisted. The fallback leaves exactly one tag row
+     * visible at the 50% minimum.
+     */
+    height: var(
+        --bulk-tag-menu-height,
+        260px
+    );
+
+    display: flex;
+    flex-direction: column;
+
+    padding: 0;
+    box-sizing: border-box;
+
+    /*
+     * No background here: the header reproduces the bottom bar's
+     * blur/transparency and the body supplies the menu surface. That
+     * makes the bar look like it itself slid up with the menu.
+     */
+    background: transparent;
+
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(calc(100% - var(--bottom-h)));
+
+    transition:
+        transform 0.28s cubic-bezier(.33, 1, .68, 1),
+        visibility 0s linear 0.28s;
+}
+
+body.bulk-tagging #bulkTagSheet {
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
+
+    transition:
+        transform 0.28s cubic-bezier(.33, 1, .68, 1),
+        visibility 0s linear 0s;
+}
+
+/* The old page bottom bar becomes the menu's top chrome row. */
+#bulkTagSheetHeader {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+
+    height: var(--bottom-h);
+    padding: 0 1vw;
+    box-sizing: border-box;
+
+    background: rgba(12, 12, 14, 0.78);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+#bulkTagResizeHandle {
+    flex: 0 0 auto;
+
+    width: var(--bottom-h);
+    height: var(--bottom-h);
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+
+    font-size: 13px;
+    line-height: 1;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    cursor: ns-resize;
+    touch-action: none;
+}
+
+#bulkTagResizeHandle:hover,
+#bulkTagResizeHandle.dragging {
+    color: #fff;
+}
+
+#bulkTagSheetBody {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+
+    flex: 1 1 auto;
+    min-height: 0;
+
+    padding: 10px 1vw calc(10px + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+
+    background: rgba(18, 18, 21, 0.97);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+}
+
+#bulkTagTopStatus {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    flex: 0 0 auto;
+    height: auto;
+}
+
+#bulkTagSheet #bulkTagSelectedCount {
+    white-space: nowrap;
+    font-size: clamp(11px, 1vw, 13px);
+    opacity: 0.8;
+}
+
+#bulkTagSheet #bulkTagClearSelection {
+    flex: 0 0 auto;
+    padding: 3px 10px;
+    font-size: 11px;
+}
+
+#bulkTagSheet #bulkTagSearchBox {
+    display: flex;
+    width: 100%;
+    height: auto;
+    min-height: 38px;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    padding: 0 8px;
+    background: #161619;
+    border: 1px solid #3a3a42;
+    border-radius: 8px;
+}
+
+#bulkTagSheet #bulkTagSearchBox:focus-within {
+    border-color: #3d7cff;
+}
+
+#bulkTagSheet #bulkTagSearch {
+    height: auto;
+    min-height: 36px;
+}
+
+/*
+ * The add-tag field sits near the bottom of the viewport, so its
+ * suggestions open upward over the gallery instead of off-screen.
+ */
+#bulkTagSheet #bulkTagSuggestions {
+    top: auto;
+    bottom: 100%;
+    margin-top: 0;
+    margin-bottom: 4px;
+    max-height: min(40vh, 280px);
+}
+
+#bulkTagSheet #bulkTagSummary {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0;
+}
+
+#bulkTagSheet #bulkTagChips {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.bulk-tag-chip {
+    cursor: pointer;
+}
+
+#bulkTagChips .search-tag {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+#bulkTagChips .bulk-tag-chip:focus-visible {
+    outline: 2px solid #3d7cff;
+    outline-offset: 1px;
+}
+
+/*
+ * Image-hover overrides. These come after .search-tag.new/.removed so
+ * they can temporarily replace the all-selected default state.
+ */
+.bulk-tag-chip.bulk-tag-hover-new {
+    background: var(--local-edit-soft);
+    border-color: var(--local-edit-strong);
+    color: #ffe6b8;
+    text-decoration: none;
+}
+
+.bulk-tag-chip.bulk-tag-hover-new .search-tag-label {
+    text-decoration: none;
+}
+
+.bulk-tag-chip.bulk-tag-hover-removed {
+    background: rgba(140, 140, 150, 0.14);
+    border-color: rgba(160, 160, 170, 0.4);
+    color: #9a9aa3;
+}
+
+.bulk-tag-chip.bulk-tag-hover-removed .search-tag-label {
+    text-decoration: line-through;
+    text-decoration-color: var(--local-edit);
+    text-decoration-thickness: 1px;
+}
+
+.bulk-tag-chip.bulk-tag-hover-blue {
+    background: rgba(61, 124, 255, 0.18);
+    border-color: rgba(61, 124, 255, 0.45);
+    color: #eaf0ff;
+    text-decoration: none;
+}
+
+.bulk-tag-chip.bulk-tag-hover-blue .search-tag-label {
+    text-decoration: none;
+}
+
+.bulk-tag-chip.bulk-tag-dimmed {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #6f6f78;
+    text-decoration: none;
+    opacity: 0.55;
+}
+
+.bulk-tag-chip.bulk-tag-dimmed .search-tag-label {
+    text-decoration: none;
+}
+
+.bulk-tag-empty {
+    font-size: 12px;
+    opacity: 0.6;
+    text-align: left;
+    padding: 4px 2px;
+}
+
+#filterMode {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 3px 4px;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#tagVisibleCount {
+    flex: 0 1 auto;
+    min-width: 0;
+    text-align: left;
+    font-size: 11px;
+    opacity: 0.65;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #clearTags {
-    margin-bottom: 8px;
-    flex-shrink: 0;
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 3px 4px;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+ * The Clear action keeps its half of the row at all times, even when
+ * there is nothing to clear, so Any/All never stretches across both.
+ */
+#tagFilterRow #clearTags {
+    display: block !important;
 }
 
 #tagList {
+    flex: 1 1 auto;
+    min-height: 0;
+
     overflow-y: auto;
     overflow-x: hidden;
+
+    overscroll-behavior: contain;
+
+    /* No visible scrollbar: it overlapped the tag counts in Firefox.
+       Wheel/trackpad scrolling still works. */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 
     display: flex;
     flex-direction: column;
     gap: 4px;
 }
 
+#tagList::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+}
+
 .tag {
     width: 100%;
     box-sizing: border-box;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
 
     font-size: 11px;
     padding: 3px 6px;
 
     text-align: left;
+}
 
-    white-space: nowrap;
-    overflow: clip;
+.tag-name {
+    min-width: 0;
+    overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tag-count {
+    flex: 0 0 auto;
+    font-size: 10px;
+    opacity: 0.55;
+    font-variant-numeric: tabular-nums;
+}
+
+.tag.selected .tag-count,
+.tag.excluded .tag-count {
+    opacity: 0.85;
 }
 
 .tag.selected {
@@ -241,9 +1187,46 @@ button {
     color: white;
 }
 
+.tag-unavailable {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+.tag-tooltip {
+    position: fixed;
+    z-index: 30000;
+    max-width: min(320px, 80vw);
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #111;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #f2f2f4;
+    font-size: 11px;
+    line-height: 1.4;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(2px);
+    transition:
+        opacity 0.12s ease,
+        transform 0.12s ease;
+}
+
+.tag-tooltip.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
 #gallery {
 	flex: 1 1 0;
     min-width: 0;
+    max-width: 100%;
+    overflow: clip;
 	
     position: relative;
     /*display: grid;
@@ -255,7 +1238,26 @@ button {
 	*/
     padding: 1vw;
 	min-width: 0;
-	--gallery-animation-speed: 0.30s;
+	--gallery-animation-speed: 0.22s;
+    transition:
+        height var(--gallery-animation-speed) ease,
+        opacity 0.22s ease;
+}
+
+/*
+ * Applied while the tab is hidden (and only acted on when the tab was
+ * away long enough for the browser to drop decoded images). The grid is
+ * already invisible before the first restored frame, then faded back in
+ * once the visible images have decoded.
+ */
+#gallery.wake-masked {
+    opacity: 0;
+    transition: none;
+}
+
+/* Used for a quick tab switch: drop the mask without any fade. */
+#gallery.wake-instant {
+    transition: none !important;
 }
 
 .thumb {
@@ -286,10 +1288,6 @@ button {
 .thumb.flip-moving {
     transition: none !important;
     will-change: transform;
-}
-
-.thumb:hover {
-    transform: scale(1.025);
 }
 
 /* Modal */
@@ -370,24 +1368,116 @@ button {
 	aspect-ratio: 1 / 1;
     object-fit: cover;
     border-radius: 8px;
-    transition: transform 0.2s;
 }
 
-.album img:hover {
-    transform: scale(1.05);
+/*
+ * One hover treatment for every clickable tile: album cards, gallery
+ * images and the add tile all get the same blue outline, so it always
+ * reads as "this is what the pointer is on". No scaling: the outline is
+ * the only hover state.
+ */
+.thumbnail-slot,
+.gallery-add-tile {
+    transition:
+        left var(--gallery-animation-speed) ease,
+        top var(--gallery-animation-speed) ease,
+        width var(--gallery-animation-speed) ease,
+        height var(--gallery-animation-speed) ease,
+        box-shadow 0.18s ease;
 }
 
-.album div {
-    margin-top: 6px;
+.album-cover {
+    transition: box-shadow 0.18s ease;
+}
+
+.thumbnail-slot:hover,
+.album-cover:hover,
+.gallery-add-tile:hover,
+.album-add-image:hover {
+    box-shadow: 0 0 0 2px rgba(61, 124, 255, 0.85);
+}
+
+.thumbnail-slot:hover {
+    z-index: 1;
+}
+
+.album-cover {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    margin-top: 8px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #1a1a1d;
+}
+
+.album-cover > img {
+    display: block;
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/*
+ * Home card for an album whose displayed data comes from
+ * localStorage. Amber outline plus a small marker so it is obvious
+ * before opening that the card no longer matches the remote record.
+ */
+.album.album-local-edited .album-cover {
+    box-shadow: 0 0 0 2px var(--local-edit-strong);
+}
+
+.album-local-badge {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    z-index: 9;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+
+    border-radius: 10px;
+
+    background: var(--local-edit);
+    color: #1a1200;
+
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+/*
+ * Album label only. This used to be `.album div`, which also matched
+ * the cover wrapper and the add tile -- dimming the cover to 90%
+ * opacity and making home covers look darker than the same image in an
+ * album. The 8px top offset lives on the cover/add tile themselves so
+ * the card geometry is unchanged.
+ */
+.album-title {
+    margin-top: 8px;
+    font-size: 13px;
+    opacity: 0.9;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .album-delete {
     position: absolute;
-    top: -8px;
-    right: -8px;
+    top: 6px;
+    right: 6px;
+    z-index: 10;
 
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
 
     padding: 0;
     margin: 0;
@@ -398,11 +1488,11 @@ button {
     background: #900;
     color: white;
 
-    font-size: 20px;
+    font-size: 18px;
     font-family: Arial, sans-serif;
     font-weight: bold;
 
-    line-height: 24px;
+    line-height: 22px;
     text-align: center;
 
     cursor: pointer;
@@ -420,45 +1510,87 @@ button {
     background: red;
 }
 
-.album-export {
-    position: absolute;
-    bottom: -8px;
-    right: -8px;
+#tagBarTopRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0;
+    margin-bottom: 6px;
+    flex: 0 0 auto;
+}
 
-    width: 26px;
-    height: 26px;
+#tagFilterRow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    flex: 0 0 auto;
+}
 
+#tagCountToggle {
+    flex: 0 0 auto;
+
+    width: 22px;
+    height: 20px;
     padding: 0;
     margin: 0;
 
-    border-radius: 50%;
     border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
 
-    background: #066;
-    color: white;
+    font-size: 11px;
+    font-weight: 600;
 
-    font-size: 16px;
-    font-weight: bold;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 
-    display: none;
-
+    border-radius: 4px;
     cursor: pointer;
 }
 
-.album:hover .album-export {
-    display: flex;
+#tagCountToggle:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+#tagCountToggle.active {
+    color: #fff;
+    background: rgba(61, 124, 255, 0.28);
+}
+
+#tagBar.tag-counts-hidden .tag-count {
+    display: none;
+}
+
+#tagBarResizeHandle {
+    position: static;
+    flex: 0 0 auto;
+
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin: 0;
+
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+
+    font-size: 12px;
+    line-height: 1;
+
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+
+    cursor: ew-resize;
+    touch-action: none;
 }
 
-.album-export:hover {
-    background: #099;
-}
-
-#tagControls {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 8px;
+#tagBarResizeHandle:hover,
+#tagBarResizeHandle.dragging {
+    color: #fff;
 }
 
 .tag.excluded {
@@ -471,65 +1603,167 @@ button {
     bottom: 0;
     left: 0;
     width: 100%;
-	height: clamp(22px, 3.5vw, 37px);
-    background-color: rgba(0, 0, 0, 0.85);
+	height: var(--bottom-h);
+    background-color: rgba(12, 12, 14, 0.78);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
     z-index: 2;
     display: flex;
     align-items: center;
 }
 
-#tagToggle {
-	font-size: clamp(5px, 2vw, 20px);
+.bottom-icon {
+    height: 78%;
+    aspect-ratio: 1 / 1;
     padding: 0;
-    border: none;
-	margin-left: 1vw;
-    background: none;
-    color: white;
-    cursor: pointer;
+    margin-left: 1vw;
     display: flex;
     align-items: center;
     justify-content: center;
-	position: absolute;
-	z-index: 2;
-	height: 100%;
-	aspect-ratio: 1/1;
-	line-height: 1;
-}
-
-#albumBottomControls {
-    width: 100%;
-    display: flex;
-    justify-content: flex-end;
-    padding: 20px;
-    box-sizing: border-box;
-}
-
-#regenerateAlbum {
-    width: 42px;
-    height: 42px;
-
-    padding: 0;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    border: none;
-    border-radius: 50%;
-
-    background: #333;
-    color: white;
-
-    font-size: 24px;
+    font-size: clamp(12px, 1.1vw, 16px);
     line-height: 1;
-
-    cursor: pointer;
-    opacity: 0.8;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 50%;
 }
 
-#regenerateAlbum:hover {
-    opacity: 1;
-    background: #444;
+.bottom-icon:hover {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* Top-right tagging entry and edit action buttons. */
+#editTagsButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(13px, 1.2vw, 18px);
+}
+
+body.bulk-tagging #editTagsButton {
+    background: rgba(61, 124, 255, 0.18);
+    border-color: rgba(61, 124, 255, 0.5);
+    color: #fff;
+}
+
+/*
+ * In tagging mode the former X stretches across the two rightmost
+ * round-button slots as a single Close button, and divides into the
+ * Save/Cancel pair when changes exist.
+ */
+#EditNameButton.bulk-close-wide {
+    width: calc(
+        (var(--nav-h) - 1px) * 1.24 +
+        clamp(6px, 0.8vw, 12px)
+    );
+    min-width: 0;
+    padding: 0 8px;
+    box-sizing: border-box;
+    aspect-ratio: auto;
+    border-radius: 999px;
+    font-size: clamp(10px, 0.95vw, 12px);
+    font-weight: 600;
+}
+
+body.bulk-tagging #editTagsButton {
+    display: none !important;
+}
+
+body.album-editing.bulk-tagging #editTagsButton {
+    display: none !important;
+}
+
+#editSaveButton {
+    background: rgba(61, 124, 255, 0.2);
+    border-color: rgba(61, 124, 255, 0.55);
+}
+
+#editCancelButton {
+    color: #ffb4ac;
+    border-color: rgba(255, 123, 114, 0.35);
+    background: rgba(255, 123, 114, 0.1);
+}
+
+#bulkTagActions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
+    margin-left: 1vw;
+}
+
+.bottom-app-button {
+    min-width: 0;
+    height: 78%;
+    padding: 0 10px;
+    font-size: clamp(11px, 0.95vw, 13px);
+    font-weight: 500;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#bottomRight {
+    margin-left: auto;
+    margin-right: 1vw;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#imageSizeControls {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-left: 1vw;
+    height: 100%;
+}
+
+.image-size-control {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    cursor: pointer;
+}
+
+.image-size-icon {
+    font-size: 12px;
+    opacity: 0.7;
+    user-select: none;
+}
+
+.image-size-slider-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.image-size-slider {
+    width: 84px;
+    height: 16px;
+    margin: 0;
+    accent-color: #3d7cff;
+    cursor: pointer;
+}
+
+.image-size-tick {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 1px;
+    height: 10px;
+    transform: translate(-50%, -50%);
+    background: rgba(255, 255, 255, 0.4);
+    pointer-events: none;
+}
+
+#bottomRight .bottom-icon {
+    margin-left: 0;
 }
 
 #modalImageContainer {
@@ -556,16 +1790,76 @@ button {
     background: rgba(0, 0, 0, 0.5);
     color: white;
 
-    font-size: 17px;
-
     cursor: pointer;
     z-index: 3;
+
+    overflow: hidden;
+    font-size: 10px;
+    font-weight: 600;
 
     opacity: 0.8;
 
     transition:
         opacity 0.15s,
-        background 0.15s;
+        background 0.15s,
+        box-shadow 0.15s,
+        color 0.15s;
+}
+
+#modalFullFill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+
+    width: 0%;
+
+    background: rgba(61, 124, 255, 0.5);
+
+    transition: width 0.15s linear;
+
+    pointer-events: none;
+
+    z-index: 0;
+}
+
+#modalFullLabel {
+    position: relative;
+    z-index: 1;
+}
+
+#modalFullSpinner {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+
+    width: 12px;
+    height: 12px;
+
+    margin: -7px 0 0 -7px;
+
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+
+    display: none;
+
+    z-index: 1;
+
+    animation: modalFullSpin 0.7s linear infinite;
+}
+
+@keyframes modalFullSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+#modalFullButton.modal-full-active {
+    background: rgba(61, 124, 255, 0.9);
+    color: #fff;
+    opacity: 1;
+    box-shadow: 0 0 0 2px rgba(61, 124, 255, 0.35);
 }
 
 #modalFullButton:hover {
@@ -573,8 +1867,24 @@ button {
     background: rgba(0, 0, 0, 0.7);
 }
 
+/*
+ * Keep the active fill visible while hovering. The plain :hover rule
+ * above has the same specificity and would otherwise paint over the
+ * blue "on" state exactly while the pointer is on the button.
+ */
+#modalFullButton.modal-full-active:hover {
+    background: rgba(61, 124, 255, 1);
+    color: #fff;
+    box-shadow: 0 0 0 2px rgba(61, 124, 255, 0.55);
+}
+
 #modalFullButton:disabled {
     cursor: default;
+}
+
+#modalFullButton[data-loading="true"] {
+    opacity: 1;
+    cursor: progress;
 }
 
 #modalImageContainer {
@@ -673,6 +1983,47 @@ button {
     z-index: 9999;
 }
 
+/*
+ * While the grid thumbnail is standing in for the larger image, the
+ * loading bar moves to the middle of the modal. The moving segment is
+ * indeterminate because the medium probe has no byte progress; once
+ * the medium is revealed the normal bottom progress bar takes over for
+ * any full-size download.
+ */
+#modalLoadingBar.placeholder {
+    left: 50%;
+    right: auto;
+    top: 50%;
+    bottom: auto;
+    width: min(280px, 66vw);
+    transform: translate(-50%, -50%);
+    opacity: 1 !important;
+    z-index: 9999;
+}
+
+#modalLoadingBar.placeholder #modalLoadingProgress {
+    width: 34%;
+    animation: modalPlaceholderSweep 1.15s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+
+#modalLoadingBar.placeholder.determinate #modalLoadingProgress {
+    animation: none;
+    transition: width 0.12s linear;
+}
+
+#modalImgSmall.modal-thumb-placeholder {
+    transition: none;
+}
+
+@keyframes modalPlaceholderSweep {
+    0% {
+        transform: translateX(-115%);
+    }
+    100% {
+        transform: translateX(315%);
+    }
+}
+
 
 #modalLoadingProgress {
     width: 0%;
@@ -697,6 +2048,81 @@ button {
 .thumbnail-slot {
     position: absolute;
     overflow: hidden;
+    border-radius: 8px;
+    background: #1a1a1d;
+    /*
+     * Let Firefox skip layout/paint (and the decode work behind it) for
+     * slots that are far outside the viewport. Slots always carry an
+     * explicit width/height, so this cannot change the grid layout.
+     */
+    content-visibility: auto;
+    contain-intrinsic-size: auto none;
+}
+
+/*
+ * Low-contrast shimmer used while a thumbnail/cover is still loading.
+ * It sits behind the real <img>, so images reveal over it naturally.
+ */
+.media-loading-placeholder {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: #17171b;
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.2s ease;
+    margin: 0;
+}
+
+.media-loading-placeholder.hidden {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.media-loading-sheen {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 55%;
+    margin: 0;
+    opacity: 1;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.12),
+        transparent
+    );
+    transform: translateX(-120%);
+    animation: mediaLoadingSweep 1.45s ease-in-out infinite;
+}
+
+/* The home card's generic "div" styling must not leak into these. */
+.album-cover .media-loading-placeholder,
+.album-cover .media-loading-placeholder div {
+    margin: 0;
+    opacity: 1;
+    font-size: 0;
+}
+
+.album-cover .media-loading-placeholder.hidden {
+    opacity: 0;
+}
+
+.media-loading-placeholder.failed .media-loading-sheen {
+    animation: none;
+    opacity: 0;
+}
+
+@keyframes mediaLoadingSweep {
+    0% {
+        transform: translateX(-120%);
+    }
+    100% {
+        transform: translateX(300%);
+    }
 }
 
 .thumbnail-image,
@@ -714,6 +2140,7 @@ button {
     width: 100%;
     aspect-ratio: 1 / 1;
     box-sizing: border-box;
+    margin-top: 8px;
 
     display: flex;
     align-items: center;
@@ -727,6 +2154,8 @@ button {
     border-radius: 8px;
 
     overflow: hidden;
+
+    transition: box-shadow 0.18s ease;
 }
 
 .album-add-image::before {
@@ -742,7 +2171,7 @@ button {
 }
 
 .album-add-image:hover {
-    transform: scale(1.05);
+    box-shadow: 0 0 0 2px rgba(61, 124, 255, 0.85);
 }
 
 .image-remove {
@@ -773,6 +2202,11 @@ button {
     color: black !important;
 }
 
+.album-delete-local {
+    background: var(--local-edit) !important;
+    color: #1a1200 !important;
+}
+
 #albumInputOverlay {
 	justify-content: center;
 	bottom: 50px;
@@ -785,6 +2219,34 @@ button {
     font-size: 13px;
 }
 
+.settings-share-section {
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 4px 0 16px;
+}
+
+.settings-share-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    margin-top: 8px;
+}
+
+.settings-share-option input {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.settings-share-hint {
+    font-size: 11px;
+    line-height: 1.4;
+    opacity: 0.65;
+    margin: 4px 0 10px 24px;
+}
+
 .settings-source {
     border: 1px solid #444;
     border-radius: 8px;
@@ -794,12 +2256,50 @@ button {
 
 .settings-source-header {
     display: flex;
+    align-items: center;
     gap: 8px;
     margin-bottom: 10px;
+    cursor: pointer;
 }
 
 .settings-source-header input {
     flex: 1;
+}
+
+.settings-source-toggle {
+    flex-shrink: 0;
+    width: 24px;
+    height: 28px;
+    padding: 0;
+    background: #2a2a30;
+    color: #ddd;
+    border: 1px solid #555;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.settings-source-toggle:hover {
+    background: #3a3a44;
+}
+
+.settings-source-body {
+    display: none;
+}
+
+.settings-source.expanded .settings-source-body {
+    display: block;
+}
+
+.settings-source-summary {
+    font-size: 11px;
+    opacity: 0.6;
+    margin: -4px 0 2px 32px;
+}
+
+.settings-source.expanded .settings-source-summary {
+    display: none;
 }
 
 .settings-subsection-title {
@@ -816,6 +2316,93 @@ button {
 
 .settings-pair-row input {
     flex: 1;
+    min-width: 0;
+}
+
+.settings-secret-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+
+.settings-secret-row input {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-pair-reveal {
+    flex-shrink: 0;
+    background: #2a2a30;
+    color: #ddd;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 0 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.settings-pair-reveal:hover {
+    background: #3a3a44;
+}
+
+.settings-auth-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.settings-auth-row select,
+.settings-auth-row input {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-auth-row select {
+    background: #161619;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 6px;
+}
+
+.settings-auth-hint {
+    font-size: 11px;
+    line-height: 1.4;
+    opacity: 0.65;
+    margin: 4px 0 8px;
+}
+
+.settings-delivery-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.settings-delivery-row select {
+    flex: 1;
+    min-width: 0;
+    background: #161619;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 6px;
+}
+
+.settings-delivery-options {
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+}
+
+.settings-delivery-check,
+.settings-delivery-max {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.settings-delivery-max-input {
+    width: 64px;
     min-width: 0;
 }
 
@@ -929,10 +2516,6 @@ button {
     pointer-events: none;
 }
 
-.gallery-add-tile:hover {
-    transform: scale(1.025);
-}
-
 .cover-flight {
     position: fixed;
     z-index: 9999;
@@ -948,4 +2531,1066 @@ button {
         top 0.92s cubic-bezier(.33, 1, .68, 1),
         width 0.92s cubic-bezier(.33, 1, .68, 1),
         height 0.92s cubic-bezier(.33, 1, .68, 1);
+}
+
+
+/* ============================================================
+ * Video: grid hover preview, badge, and the HLS player
+ * ========================================================== */
+
+.video-preview {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.video-preview.playing {
+    opacity: 1;
+}
+
+.video-badge {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    z-index: 3;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    font-size: 11px;
+    pointer-events: none;
+}
+
+#modalVideoClose {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    z-index: 8;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 18px;
+}
+
+#hlsPlayerWrap {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    background: #000;
+    text-align: left;
+    user-select: none;
+}
+
+#hlsPlayerWrap.idle {
+    cursor: none;
+}
+
+#hlsPlayerWrap #modalVideo {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    left: 0;
+    top: 0;
+    transform: none;
+    object-fit: contain;
+    background: #000;
+}
+
+.hls-title {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 60px;
+    padding: 14px 16px;
+    font-size: 16px;
+    background: linear-gradient(rgba(0, 0, 0, 0.7), transparent);
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.hls-status {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+}
+
+.hls-status:empty {
+    display: none;
+}
+
+.hls-controls {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 24px 16px 10px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+    transition: opacity 0.2s;
+}
+
+#hlsPlayerWrap.idle .hls-controls,
+#hlsPlayerWrap.idle .hls-title {
+    opacity: 0;
+}
+
+.hls-seek {
+    position: relative;
+    height: 6px;
+    margin-bottom: 12px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.25);
+    cursor: pointer;
+    touch-action: none;
+}
+
+.hls-seek::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -8px;
+    bottom: -8px;
+}
+
+.hls-seek-buffered,
+.hls-seek-played {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    border-radius: 3px;
+    pointer-events: none;
+}
+
+.hls-seek-buffered {
+    background: rgba(255, 255, 255, 0.35);
+}
+
+.hls-seek-played {
+    background: #3d7cff;
+}
+
+.hls-seek-markers {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.hls-marker {
+    position: absolute;
+    top: -3px;
+    width: 3px;
+    height: 12px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background: #ffd54a;
+}
+
+.hls-seek-tip {
+    position: absolute;
+    bottom: 14px;
+    transform: translateX(-50%);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.hls-seek-tip.visible {
+    display: flex;
+}
+
+.hls-seek-thumb {
+    display: none;
+    border: 1px solid #fff;
+    border-radius: 4px;
+    background-repeat: no-repeat;
+    background-color: #000;
+}
+
+.hls-seek-label {
+    margin-top: 4px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.8);
+    font-size: 12px;
+}
+
+.hls-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+}
+
+.hls-row button {
+    min-width: 32px;
+    height: 32px;
+}
+
+.hls-chapter-name {
+    opacity: 0.8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hls-spacer {
+    flex: 1;
+}
+
+.hls-editor {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(420px, 100%);
+    box-sizing: border-box;
+    padding: 56px 16px 16px;
+    overflow-y: auto;
+    background: rgba(20, 20, 20, 0.95);
+    z-index: 2;
+}
+
+.hls-editor[hidden] {
+    display: none;
+}
+
+.hls-editor label {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 12px;
+    opacity: 0.9;
+}
+
+.hls-editor label input,
+.hls-editor label textarea {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 3px;
+}
+
+.hls-editor-head {
+    margin: 10px 0 8px;
+    font-weight: bold;
+}
+
+.hls-ed-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.hls-ed-time {
+    width: 64px;
+    flex-shrink: 0;
+}
+
+.hls-ed-name {
+    flex: 1;
+    min-width: 0;
+}
+
+.hls-editor-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.hls-ed-status {
+    margin-top: 10px;
+    font-size: 12px;
+    opacity: 0.85;
+}
+
+/* ============================================================
+ * Shared chrome: dialogs, settings menu, form fields.
+ * Added so the settings menu, in-window prompts and configuration
+ * editor use the same surface instead of each rolling its own inline
+ * colours and spacing.
+ * ========================================================== */
+
+.app-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20000;
+    padding: 20px;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.62);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.app-dialog {
+    width: min(440px, 94vw);
+    max-height: 85vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 22px;
+    text-align: left;
+    background: #1d1d22;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+}
+
+.app-dialog-title {
+    margin-bottom: 14px;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}
+
+.app-dialog-message {
+    margin-bottom: 10px;
+    font-size: 13px;
+    line-height: 1.45;
+    opacity: 0.8;
+    white-space: pre-wrap;
+}
+
+.app-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.app-dialog-close {
+    display: block;
+    margin: 4px 0 0 auto;
+}
+
+/* File pickers in the shared dialogs and the uploader channel settings. */
+.app-dialog input[type="file"],
+.channel-settings-file {
+    color: #bbb;
+    font-size: 12px;
+}
+
+.app-dialog input[type="file"]::file-selector-button,
+.channel-settings-file::file-selector-button {
+    margin-right: 8px;
+    padding: 4px 10px;
+    border: 1px solid #3a3a42;
+    border-radius: 6px;
+    background: #2a2a30;
+    color: #f2f2f4;
+    font: inherit;
+    cursor: pointer;
+}
+
+.app-dialog input[type="file"]::file-selector-button:hover,
+.channel-settings-file::file-selector-button:hover {
+    background: #34343c;
+}
+
+.app-button {
+    min-width: 72px;
+    padding: 7px 14px;
+    font-weight: 500;
+}
+
+.app-button-primary {
+    background: #3d7cff;
+    border-color: #3d7cff;
+    color: #fff;
+}
+
+.app-button-primary:hover {
+    background: #548bff;
+    border-color: #548bff;
+}
+
+.app-button-danger {
+    background: #dc2626;
+    border-color: #dc2626;
+    color: #fff;
+}
+
+.app-button-danger:hover {
+    background: #ef4444;
+    border-color: #ef4444;
+}
+
+.app-field {
+    width: 100%;
+    margin-bottom: 4px;
+}
+
+.app-field-multiline {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    resize: vertical;
+}
+
+.app-menu-item {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0 0 10px;
+    padding: 11px 13px;
+    text-align: left;
+}
+
+.app-menu-label {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.app-menu-desc {
+    margin-top: 3px;
+    font-size: 12px;
+    line-height: 1.4;
+    opacity: 0.7;
+    white-space: normal;
+}
+
+.app-settings-menu {
+    width: min(420px, 94vw);
+}
+
+.album-input-empty {
+    width: 100%;
+    margin-top: 12px;
+    padding: 8px;
+    background: #2a2a30;
+    color: #eee;
+    border: 1px solid #555;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.album-input-empty:hover {
+    background: #3a3a44;
+}
+
+.album-manifest-dialog {
+    width: min(720px, 94vw);
+    max-height: 90vh;
+    overflow: auto;
+}
+
+.album-manifest-status {
+    font-size: 12px;
+    opacity: 0.7;
+    margin: 6px 0 10px;
+}
+
+.album-manifest-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.album-manifest-output {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 220px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    background: #111;
+    color: #ddd;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 8px;
+    margin-bottom: 12px;
+}
+
+.album-manifest-dialog {
+    position: relative;
+}
+
+.album-manifest-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #bbb;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.album-manifest-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* ---- Inline album edit mode ---- */
+
+.album-edit-title-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 60%;
+    margin: 0;
+    padding: 0 10px;
+    font: inherit;
+    font-size: clamp(15px, 1.6vw, 22px);
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: #f2f2f4;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    outline: none;
+}
+
+.album-edit-title-input:focus {
+    border-color: #3d7cff;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 2px rgba(61, 124, 255, 0.25);
+}
+
+.album-edit-source {
+    flex: 0 1 180px;
+    min-width: 92px;
+    height: 60%;
+    min-height: 26px;
+    padding: 0 8px;
+    font: inherit;
+    font-size: clamp(12px, 1.1vw, 15px);
+    color: #f2f2f4;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    outline: none;
+}
+
+.album-edit-source:focus {
+    border-color: #3d7cff;
+}
+
+/*
+ * Amber state for title/source that differ from what the album had
+ * when edit mode was entered. These win over the blue focus colour so
+ * the "changed" state stays visible while typing.
+ */
+.album-edit-title-input.album-edit-changed,
+.album-edit-title-input.album-edit-changed:focus,
+.album-edit-source.album-edit-changed,
+.album-edit-source.album-edit-changed:focus {
+    border-color: var(--local-edit-strong);
+    background: var(--local-edit-soft);
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
+}
+
+body.album-editing #saveButton,
+body.album-editing #settingsButton,
+body.album-editing #gallery .gallery-add-tile {
+    display: none !important;
+}
+
+/*
+ * The search field and tag sidebar are animated out over the same
+ * duration as the gallery/grid transition instead of disappearing
+ * instantly via display:none.
+ */
+body.album-editing #searchCont {
+    width: 0 !important;
+    opacity: 0;
+    pointer-events: none;
+}
+
+body.album-editing.bulk-tagging #searchCont {
+    width: 0 !important;
+    opacity: 0;
+    pointer-events: none;
+    display: none !important;
+}
+
+body.album-editing #generateManifest,
+body.album-editing #regenerateAlbum,
+body.album-editing #editTagsButton {
+    display: inline-flex !important;
+    animation: albumEditPop var(--album-edit-speed) ease;
+}
+
+body.album-editing #backButton {
+    animation: albumEditPop var(--album-edit-speed) ease;
+}
+
+body.album-editing #EditNameButton {
+    color: #ffb4ac;
+    border-color: rgba(255, 123, 114, 0.5);
+    background: rgba(255, 123, 114, 0.12);
+    box-shadow: none;
+    animation: albumEditPop var(--album-edit-speed) ease;
+}
+
+body.album-editing #EditNameButton:hover {
+    background: rgba(255, 123, 114, 0.2);
+    border-color: rgba(255, 123, 114, 0.6);
+}
+
+@keyframes albumEditPop {
+    from {
+        opacity: 0;
+        transform: scale(0.85);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/*
+ * The tagging-mode Close spans exactly two normal round nav buttons
+ * plus their gap, overriding the compact edit-mode Close sizing.
+ */
+body.album-editing #EditNameButton.bulk-close-wide,
+body.album-editing #EditNameButton.bulk-close-wide.album-edit-close {
+    width: calc(
+        (var(--nav-h) - 1px) * 1.24 +
+        clamp(6px, 0.8vw, 12px)
+    );
+    min-width: 0;
+    height: 62%;
+    padding: 0 8px;
+    aspect-ratio: auto;
+    border-radius: 999px;
+    font-size: clamp(10px, 0.95vw, 12px);
+    font-weight: 600;
+}
+
+body.album-editing #backButton:hover {
+    color: #ff7b72;
+    border-color: rgba(255, 123, 114, 0.5);
+    background: rgba(255, 123, 114, 0.12);
+}
+
+body.album-editing #gallery .thumbnail-slot {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+body.album-editing #gallery .thumbnail-slot img,
+body.album-editing #gallery .thumbnail-slot .video-badge {
+    pointer-events: none;
+}
+
+body.album-editing #gallery .image-remove {
+    display: none !important;
+}
+
+/* ---- Bulk tag mode (inside album edit mode) ---- */
+
+body.album-editing.bulk-tagging #searchCont {
+    display: none !important;
+}
+
+/*
+ * The tag bar is no longer repurposed by tagging mode: it stays the
+ * normal filter sidebar and is toggled from the nav like every other
+ * view. Only the album-level chrome is hidden while tagging.
+ */
+body.bulk-tagging #searchButton,
+body.bulk-tagging #backButton,
+body.bulk-tagging #saveButton,
+body.bulk-tagging .album-edit-source,
+body.bulk-tagging .album-edit-title-input {
+    display: none !important;
+}
+
+/* Leave room to scroll the last row above the tagging sheet. */
+/* The page bar hides while the tagging sheet occupies its place, and
+ * only returns once the sheet has finished sliding back down. */
+#bottomBar {
+    visibility: visible;
+    transition: visibility 0s linear 0.28s;
+}
+
+body.bulk-tagging #bottomBar {
+    visibility: hidden;
+    pointer-events: none;
+    transition: visibility 0s linear 0s;
+}
+
+/* Leave room to scroll the last row above the tagging sheet. */
+body.bulk-tagging #content {
+    padding-bottom: var(
+        --bulk-tag-menu-height,
+        260px
+    );
+}
+
+body.bulk-tagging #tagBar {
+    max-height: calc(
+        100vh - var(--nav-h) - 1vw -
+        var(--bulk-tag-menu-height, 260px)
+    );
+}
+
+body.bulk-tagging .album-grid-cell {
+    cursor: pointer;
+}
+
+body.bulk-tagging .album-grid-cell.album-grid-empty {
+    cursor: default;
+}
+
+body.bulk-tagging .album-grid-add {
+    display: none !important;
+}
+
+body.bulk-tagging .album-grid-cell.bulk-tag-selected {
+    outline: 2px solid #3d7cff;
+    outline-offset: -2px;
+    border-color: #3d7cff;
+    box-shadow: 0 0 0 2px rgba(61, 124, 255, 0.25) inset;
+}
+
+body.bulk-tagging .album-grid-cell.bulk-tag-image-dimmed {
+    opacity: 0.2;
+    filter: grayscale(1);
+}
+
+.album-grid-cell {
+    position: absolute;
+    box-sizing: border-box;
+
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+
+    transition:
+        left var(--gallery-animation-speed) ease,
+        top var(--gallery-animation-speed) ease,
+        width var(--gallery-animation-speed) ease,
+        height var(--gallery-animation-speed) ease,
+        border-color 0.15s ease,
+        background-color 0.15s ease,
+        opacity var(--album-edit-speed) ease;
+}
+
+.album-grid-cell.album-grid-filled {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: transparent;
+    cursor: grab;
+}
+
+.album-grid-cell.album-grid-filled:hover {
+    border-color: rgba(61, 124, 255, 0.5);
+}
+
+/*
+ * A tile whose image was moved, had a URL changed, or had tags
+ * changed in this edit session (including newly added images).
+ */
+.album-grid-cell.album-grid-changed {
+    outline: 2px solid var(--local-edit-strong);
+    outline-offset: -2px;
+    border-color: var(--local-edit-strong);
+}
+
+.album-grid-cell.album-grid-empty {
+    cursor: pointer;
+}
+
+.album-grid-cell.album-grid-empty:hover {
+    border-color: #3d7cff;
+    background: rgba(61, 124, 255, 0.08);
+}
+
+.album-grid-cell > .thumbnail-slot {
+    position: absolute !important;
+    left: 2px !important;
+    top: 2px !important;
+    width: calc(100% - 4px) !important;
+    height: calc(100% - 4px) !important;
+    pointer-events: none;
+}
+
+.album-grid-add {
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: calc(100% - 4px);
+    height: calc(100% - 4px);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 0;
+    border: 1px dashed rgba(255, 255, 255, 0.25);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+
+    font-size: clamp(24px, 3vw, 48px);
+    font-weight: 300;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.album-grid-cell.album-grid-empty:hover .album-grid-add {
+    border-color: #3d7cff;
+    color: #fff;
+    background: rgba(61, 124, 255, 0.08);
+}
+
+.album-grid-cell.album-dragging {
+    outline: 2px solid rgba(61, 124, 255, 0.8);
+    outline-offset: -2px;
+    cursor: grabbing;
+}
+
+.album-drag-ghost {
+    border-radius: 8px;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+.album-grid-cell.album-drop-target {
+    outline: 2px dashed #3d7cff;
+    outline-offset: -2px;
+}
+
+/* ---- Image editor: large preview, URL fields, tags ---- */
+
+/*
+ * A URL field whose value differs from what the image was last saved
+ * with. The inline border set by the editor needs !important here.
+ */
+.image-editor-url-field.image-editor-field-changed {
+    border-color: var(--local-edit-strong) !important;
+    box-shadow: 0 0 0 1px var(--local-edit-strong) inset !important;
+    background: rgba(245, 158, 11, 0.09) !important;
+}
+
+.image-editor-body {
+    display: flex;
+    gap: 16px;
+    min-height: 0;
+    flex: 1 1 auto;
+}
+
+.image-editor-preview {
+    position: relative;
+    flex: 1 1 58%;
+    min-width: 0;
+    height: min(62vh, 520px);
+    background: #111;
+    border: 1px solid #3a3a42;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.image-editor-preview.dragging {
+    cursor: grabbing;
+}
+
+.image-editor-preview img {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    transform-origin: center center;
+    will-change: transform;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.image-editor-preview-label {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.7);
+    color: #ddd;
+    font-size: 11px;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.image-editor-preview-empty {
+    color: #888;
+    font-size: 13px;
+    pointer-events: none;
+}
+
+.image-editor-side {
+    flex: 1 1 42%;
+    min-width: 280px;
+    height: min(62vh, 520px);
+    box-sizing: border-box;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    padding-right: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.image-editor-urls {
+    flex: 0 0 auto;
+}
+
+.image-editor-tags {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 0;
+}
+
+.image-editor-tags-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-right: 2px;
+}
+
+.image-editor-tag-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+}
+
+.image-editor-tag-chips .search-tag {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.image-editor-tag-chips .search-tag:focus-visible {
+    outline: 2px solid #3d7cff;
+    outline-offset: 1px;
+}
+
+.image-editor-tag-chips .search-tag-remove {
+    width: 16px;
+    height: 16px;
+    font-size: 13px;
+}
+
+.image-editor-tag-none {
+    color: #777;
+    font-size: 12px;
+}
+
+.image-editor-tag-box {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 34px;
+    padding: 4px 6px;
+    box-sizing: border-box;
+    background: #161619;
+    border: 1px solid #444;
+    border-radius: 6px;
+}
+
+.image-editor-tag-box:focus-within {
+    border-color: #3d7cff;
+}
+
+.image-editor-tag-input {
+    flex: 1 1 auto;
+    min-width: 60px;
+    padding: 4px 2px;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: #eee;
+    font: inherit;
+    font-size: 13px;
+}
+
+.image-editor-tag-suggestions {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    margin-top: 4px;
+    background: #1d1d22;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+    max-height: 180px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    z-index: 10;
+}
+
+.image-editor-tag-suggestions:empty {
+    display: none;
+}
+
+.image-editor-tag-suggestions .suggestion {
+    padding: 5px 8px;
+    font-size: 12px;
+}
+
+@media (max-width: 760px) {
+
+    .image-editor-body {
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .image-editor-preview {
+        flex: 0 0 auto;
+        height: 38vh;
+    }
+
+    .image-editor-side {
+        flex: 1 1 auto;
+        height: auto;
+        max-height: none;
+        min-height: 0;
+        overflow: hidden;
+    }
+
 }

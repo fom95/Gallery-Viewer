@@ -10,37 +10,90 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+	<div id="bootLoader">
+		<div class="boot-spinner"></div>
+		<div class="boot-label">Loading gallery…</div>
+	</div>
+	<script>
+		setTimeout(() => {
+			if (!document.documentElement.classList.contains("pageLoading"))
+				return;
+
+			const label =
+				document.querySelector("#bootLoader .boot-label");
+
+			if (label) {
+				label.textContent =
+					"Still loading… a cold start can take a moment.";
+			}
+		}, 12000);
+	</script>
 	<div id="nav">
 		<div id="navCont">
 			<div id="searchCont">
-				<input id="tagSearch" placeholder="Search tags...">
-				<button id="clearSearch">×</button>
-				<div id="tagSuggestions"></div>
+				<div id="tagSearchBox">
+					<div id="tagSearchChips"></div>
+					<input id="tagSearch" placeholder="">
+					<button id="clearSearch" type="button" aria-label="Add tags">×</button>
+					<div id="tagSuggestions"></div>
+				</div>
 			</div>
-			<button id="searchButton">🔍</button>
+			<button id="searchButton" class="nav-icon" aria-label="Search" style="display:none;">🔍</button>
 			<h1 id="pageName">ImgBB Galleries</h1>
-			<button id="saveButton" onclick="saveCurrentAlbum()" style="display:none;">
+			<div id="bulkTagModeLabel">Tagging Mode</div>
+			<button id="tagToggle" class="nav-icon" title="Show/Hide Tags">🏷</button>
+			<button id="editTagsButton" class="nav-icon album-tagging-button" title="Tagging mode" style="display:none;" aria-label="Tagging mode">☑</button>
+			<button id="editSaveButton" class="nav-icon" title="Save changes" style="display:none;">✓</button>
+			<button id="editCancelButton" class="nav-icon" title="Cancel changes" style="display:none;">×</button>
+			<button id="saveButton" class="nav-icon" onclick="saveCurrentAlbum()" title="Save album" style="display:none;">
 				💾
 			</button>
-			<button id="settingsButton" onclick="openSettingsEditor()" title="Settings" style="display:none;">
-				⚙️
-			</button>
-			<button id="backButton" onclick="returnToAlbums()" style="display:none;">
+			<button id="backButton" class="nav-icon" onclick="returnToAlbums()" title="Back to albums" style="display:none;">
 				←
 			</button>
 		</div>
 	</div>
+
+	<div id="searchOverlay"></div>
+
+	<div id="searchResultsTags"></div>
 	
 	<div id="content">
 		<div id="tagBar">
-			<div id="tagControls">
-				<button id="filterMode">Any</button>
-				<button id="clearTags" style="display:none;">Clear</button>
+			<div id="tagBarTopRow">
+				<span id="tagVisibleCount" class="tag-visible-count"></span>
+				<button id="tagCountToggle" type="button" title="Hide tag counts" aria-pressed="true">#</button>
+				<button id="tagBarResizeHandle" type="button" title="Drag to resize" aria-label="Resize tag bar">⇔</button>
 			</div>
-			<div id="tagList"></div>
+			<div id="tagFilterPane">
+				<div id="tagFilterRow">
+					<button id="filterMode">All</button>
+					<button id="clearTags" style="display:none;">Clear</button>
+				</div>
+				<div id="tagList"></div>
+			</div>
 		</div>
 
 		<div id="gallery"></div>
+	</div>
+
+	<div id="bulkTagSheet">
+		<div id="bulkTagSheetHeader">
+			<button id="bulkTagResizeHandle" type="button" title="Drag to resize" aria-label="Resize tagging menu">⇕</button>
+			<div id="bulkTagTopStatus">
+				<span id="bulkTagSelectedCount">0 selected</span>
+				<button id="bulkTagClearSelection" type="button" title="Select all images">All</button>
+			</div>
+		</div>
+		<div id="bulkTagSheetBody">
+			<div id="bulkTagSearchBox">
+				<input id="bulkTagSearch" placeholder="add tags…" autocomplete="off">
+				<div id="bulkTagSuggestions"></div>
+			</div>
+			<div id="bulkTagSummary">
+				<div id="bulkTagChips"></div>
+			</div>
+		</div>
 	</div>
 	
 	<div id="modal" class="modal">
@@ -50,8 +103,10 @@
 			<img id="modalImgFull">
 		</div>
 		<div id="zoomLevel">1.0x</div>
-		<button id="modalFullButton" type="button" title="Switch Resolutions">
-			🔍
+		<button id="modalFullButton" type="button" title="Show full resolution" aria-pressed="false">
+			<span id="modalFullFill" aria-hidden="true"></span>
+			<span id="modalFullLabel">HD</span>
+			<span id="modalFullSpinner" aria-hidden="true"></span>
 		</button>
 		<div id="modalLoading"></div>
 		<div id="modalLoadingBar">
@@ -60,56 +115,112 @@
 	</div>
 	
 	<div id="bottomBar">
-		<button id="tagToggle" title="Show/Hide Tags">🏷</button>
+		<div id="imageSizeControls">
+			<label class="image-size-control" title="Image width">
+				<span class="image-size-icon">↔</span>
+				<span class="image-size-slider-wrap">
+					<input id="albumImageWidth" class="image-size-slider" type="range" min="-50" max="50" step="1" value="0">
+					<span class="image-size-tick" aria-hidden="true"></span>
+				</span>
+			</label>
+			<label class="image-size-control" title="Image height">
+				<span class="image-size-icon">↕</span>
+				<span class="image-size-slider-wrap">
+					<input id="albumImageHeight" class="image-size-slider" type="range" min="-50" max="50" step="1" value="0">
+					<span class="image-size-tick" aria-hidden="true"></span>
+				</span>
+			</label>
+		</div>
+		<div id="bottomRight">
+			<button id="generateManifest" class="bottom-icon" title="Generate album manifest" style="display:none;">📄</button>
+			<button id="regenerateAlbum" class="bottom-icon" title="Regenerate album entry">↻</button>
+			<button id="settingsButton" class="bottom-icon" onclick="openSettingsEditor()" title="Settings">⚙️</button>
+		</div>
 	</div>
-	<footer id="albumBottomControls">
-		<button id="regenerateAlbum" title="Regenerate albums.js entry">↻</button>
-	</footer>
 </body>
 
 <script type="module">
 
-    const {
-        Client,
-        StorageIndexedDB
-    } = await import(
-        "https://esm.sh/@mtkruto/browser"
-    );
+    /*
+     * Start the Telegram bundle immediately but do not block the local
+     * modules on it. The home page does not need mtcute until an album
+     * or uploader actually connects, so an external esm.sh request
+     * should not delay the first paint.
+     */
+    window.telegramLibraryPromise =
+        import("https://esm.sh/@mtcute/web")
+            .then(module => {
 
-    window.TelegramClient =
-        Client;
+                window.TelegramClient =
+                    module.TelegramClient;
 
-    window.TelegramStorageIndexedDB =
-        StorageIndexedDB;
+                console.log(
+                    "[TELEGRAM] mtcute loaded."
+                );
 
-    console.log(
-        "[TELEGRAM] MTKruto loaded."
-    );
+                return module.TelegramClient;
+
+            })
+            .catch(error => {
+
+                console.debug(
+                    "[TELEGRAM] mtcute failed to load",
+                    error
+                );
+
+                return null;
+
+            });
 
     const moduleFiles = [
-        "00-state-and-config.js",
-        "00b-config-and-providers.js",
-        "01-album-routing-and-parsing.js",
-        "02-albums-home-view.js",
-        "03-temporary-albums-and-import-dialog.js",
-        "04-telegram-import.js",
-        "05-album-loading-and-render.js",
-        "06-image-asset-sources.js",
-        "07-thumbnail-loading-pipeline.js",
-        "08-medium-loading-pipeline.js",
-        "09-full-image-loader.js",
-        "10-modal-viewer.js",
-        "11-zoom-and-pan.js",
-        "12-image-navigation-and-touch.js",
-        "13-tag-filtering-and-gallery-layout.js",
-        "14-xmp-metadata.js",
-        "15-tag-search-and-suggestions.js",
-        "16-tag-bar-state-and-center-return.js",
-        "17-add-image-editor.js",
-        "18-reload-albums-and-persistence.js",
-        "19-album_editing.js",
-        "20-view-transitions.js",
-        "21-config-editor.js",
+        // Core: state/config, dialogs, manifest contract, routing.
+        "00-config-and-state.js",
+        "01-dialogs.js",
+        "02-gallery-manifest.js",
+        "03-routing.js",
+
+        // Albums: home view, temporary/Telegram imports, album loading.
+        "04-home.js",
+        "05-temporary-albums.js",
+        "06-telegram-import.js",
+        "07-album-loading.js",
+
+        // Image URL resolution and progressive loading.
+        "08-image-sources.js",
+        "09-thumbnail-loading.js",
+        "10-medium-loading.js",
+        "11-full-image-loader.js",
+
+        // Viewer, navigation, and tag UI.
+        "12-modal-viewer.js",
+        "13-zoom-and-pan.js",
+        "14-image-navigation.js",
+        "15-tag-filtering.js",
+        "16-xmp-metadata.js",
+        "17-tag-search.js",
+        "18-tag-bar.js",
+
+        // Editing and persistence.
+        "19-image-editor.js",
+        "20-albums-persistence.js",
+        "21-album-library.js",
+        "22-album-editing.js",
+        "23-view-transitions.js",
+
+        // Settings and the Telegram uploader.
+        "24-settings.js",
+        "25-telegram-uploader.js",
+
+        // Video.
+        "26-video-support.js",
+        "27-mp4-clip.js",
+
+        // Hosted index, manifests, bulk tagging, wake handling.
+        "28-tag-index.js",
+        "29-album-manifest-tool.js",
+        "30-bulk-tagging.js",
+        "31-wake-smoothing.js",
+
         "99-bootstrap.js"
     ];
 
@@ -121,6 +232,14 @@
             script.src =
                 "./modules/" + src;
 
+            /*
+             * Dynamically inserted scripts are async by default. With
+             * async = false they download in parallel but still execute
+             * in insertion order, preserving every module dependency.
+             */
+            script.async =
+                false;
+
             script.onload = resolve;
             script.onerror = () =>
                 reject(new Error("Failed to load " + src));
@@ -131,9 +250,9 @@
         });
     }
 
-    for (const file of moduleFiles) {
-        await loadScript(file);
-    }
+    await Promise.all(
+        moduleFiles.map(loadScript)
+    );
 
     console.log(
         "[GALLERY] All modules loaded."
